@@ -42,8 +42,16 @@ typedef struct EXPORTED_FUNCTION{
 typedef struct{
 	BYTE* data;
 	uint32_t image_base;
+	uint32_t entry_point;
 	IMAGE_NT_HEADERS* nt_headers;
 	IMAGE_SECTION_HEADER* section_headers;
 	IMPORT_TABLE* import_table;
 	EXPORTED_FUNCTION *export_table;
 } LOADED_PE_IMAGE;
+
+
+typedef struct LOADED_IMAGE{
+	LOADED_PE_IMAGE image;
+	char* name;
+	struct LOADED_IMAGE* next;
+} LOADED_IMAGE;

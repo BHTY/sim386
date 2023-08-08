@@ -8,8 +8,37 @@ const char* reg_names_16[8] = {"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI"};
 const char* reg_names_32[8] = {"EAX", "ECX", "EDX", "EBX", "ESP", "EBP", "ESI", "EDI"};
 const char** tables[2] = { reg_names_16, reg_names_32 };
 
+void cpu_clear_flag(i386* cpu, uint8_t flag){
+	cpu->eflags &= ~(1 << flag);
+}
+
+void cpu_set_flag(i386* cpu, uint8_t flag){
+	cpu->eflags |= (1 << flag);
+}
+
+void cpu_set_zf(i386* cpu, uint32_t value){
+	if (value == 0){
+		cpu_set_flag(cpu, 6);
+	}
+	else{
+		cpu_clear_flag(cpu, 6);
+	}
+}
+
 uint32_t alu_sub32(i386* cpu, uint32_t a, uint32_t b){ //also has to set flags
 	uint32_t result = a - b;
+	cpu_set_zf(cpu, result);
+	return result;
+}
+
+uint32_t alu_and32(i386* cpu, uint32_t a, uint32_t b){ //also has to set flags
+	uint32_t result = a & b;
+	cpu_set_zf(cpu, result);
+	return result;
+}
+
+uint32_t alu_add32(i386* cpu, uint32_t a, uint32_t b){ //also has to set flags
+	uint32_t result = a + b;
 	return result;
 }
 
@@ -62,8 +91,7 @@ void cpu_cmp16(i386* cpu, uint16_t* dst_ptr, uint16_t* src_ptr){
 }
 
 void cpu_add32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
-	printf("32-bit addition is unimplemented!");
-	cpu->running = 0;
+	*dst_ptr = alu_add32(cpu, *dst_ptr, *src_ptr);
 }
 
 void cpu_or32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
@@ -82,8 +110,7 @@ void cpu_sbb32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
 }
 
 void cpu_and32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
-	printf("32-bit AND is unimplemented!");
-	cpu->running = 0;
+	*dst_ptr = alu_and32(cpu, *dst_ptr, *src_ptr);
 }
 
 void cpu_sub32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
@@ -96,8 +123,7 @@ void cpu_xor32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
 }
 
 void cpu_cmp32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
-	printf("32-bit comparison is unimplemented!");
-	cpu->running = 0;
+	alu_sub32(cpu, *dst_ptr, *src_ptr);
 }
 
 void cpu_inc32(i386* cpu, uint32_t* dst_ptr){
@@ -123,6 +149,8 @@ void cpu_dec16(i386* cpu, uint16_t* dst_ptr){
 const char* arith_family_names[8] = {"ADD", "OR", "ADC", "SBB", "AND", "SUB", "XOR", "CMP"};
 void(*arith_family_fns_16[8])(i386*, uint16_t*, uint16_t*) = {cpu_add16, cpu_or16, cpu_adc16, cpu_sbb16, cpu_and16, cpu_sub16, cpu_xor16, cpu_cmp16};
 void(*arith_family_fns_32[8])(i386*, uint32_t*, uint32_t*) = {cpu_add32, cpu_or32, cpu_adc32, cpu_sbb32, cpu_and32, cpu_sub32, cpu_xor32, cpu_cmp32};
+
+const char* mul_family_names[8] = {"TEST", NULL, "NOT", "NEG", "MUL", "IMUL", "DIV", "IDIV"};
 
 void cpu_push16(i386* cpu, uint16_t *val){
 	cpu->esp -= 2;
@@ -236,12 +264,12 @@ uint32_t calc_modrm_addr(i386* cpu, uint8_t modrm){
 		case 1: //disp8
 			addr += (int32_t)*(int8_t*)disp;
 			cpu->ip++;
-			printf("+%p", (int32_t)*(int8_t*)disp);
+			printf("%s+%p", reg_names_32[RM(modrm)], (int32_t)*(int8_t*)disp);
 			break;
 		case 2: //disp32
 			addr += *disp;
 			cpu->ip += 4;
-			printf("+%p", *disp);
+			printf("%s+%p", reg_names_32[RM(modrm)], *disp);
 			break;
 	}
 
@@ -288,22 +316,137 @@ void map_section(i386* cpu, uint32_t vaddr, uint8_t* paddr, uint32_t size){
 	}
 }
 
+void op_50(i386* cpu){ //push eax
+	printf("PUSH ");
+
+	switch (cpu->operand_size){
+	case 0:
+		printf("AX");
+		cpu_push16(cpu, &(cpu->ax));
+		break;
+	case 1:
+		printf("EAX");
+		cpu_push32(cpu, &(cpu->eax));
+		break;
+	}
+
+	cpu->eip++;
+}
+
+void op_53(i386* cpu){ //push ebx
+	printf("PUSH ");
+
+	switch (cpu->operand_size){
+	case 0:
+		printf("BX");
+		cpu_push16(cpu, &(cpu->bx));
+		break;
+	case 1:
+		printf("EBX");
+		cpu_push32(cpu, &(cpu->ebx));
+		break;
+	}
+
+	cpu->eip++;
+}
+
+void op_55(i386* cpu){ //push ebp
+	printf("PUSH ");
+
+	switch (cpu->operand_size){
+		case 0:
+			printf("BP");
+			cpu_push16(cpu, &(cpu->bp));
+			break;
+		case 1:
+			printf("EBP");
+			cpu_push32(cpu, &(cpu->ebp));
+			break;
+	}
+
+	cpu->eip++;
+}
+
+void op_56(i386* cpu){ //push esi
+	printf("PUSH ");
+
+	switch (cpu->operand_size){
+	case 0:
+		printf("SI");
+		cpu_push16(cpu, &(cpu->si));
+		break;
+	case 1:
+		printf("ESI");
+		cpu_push32(cpu, &(cpu->esi));
+		break;
+	}
+
+	cpu->eip++;
+}
+
+void op_57(i386* cpu){ //push edi
+	printf("PUSH ");
+
+	switch (cpu->operand_size){
+	case 0:
+		printf("DI");
+		cpu_push16(cpu, &(cpu->di));
+		break;
+	case 1:
+		printf("EDI");
+		cpu_push32(cpu, &(cpu->edi));
+		break;
+	}
+
+	cpu->eip++;
+}
+
+void op_5B(i386* cpu){ //pop ebx
+	printf("POP EBX");
+	cpu->ebx = cpu_pop32(cpu);
+	cpu->eip++;
+}
+
+void op_5C(i386* cpu){ //pop esp
+	printf("POP ESP");
+	cpu->esp = cpu_pop32(cpu);
+	cpu->eip++;
+}
+
+void op_5D(i386* cpu){ //pop ebp
+	printf("POP EBP");
+	cpu->ebp = cpu_pop32(cpu);
+	cpu->eip++;
+}
+
+void op_5E(i386* cpu){ //pop esi
+	printf("POP ESI");
+	cpu->esi = cpu_pop32(cpu);
+	cpu->eip++;
+}
+
+void op_5F(i386* cpu){ //pop edi
+	printf("POP EDI");
+	cpu->edi = cpu_pop32(cpu);
+	cpu->eip++;
+}
+
 void op_68(i386* cpu){ //push imm16/32
 	uint32_t imm = *(uint32_t*)(virtual_to_physical_addr(cpu, cpu->eip + 1));
 
 	printf("PUSH ", imm);
 
 	switch (cpu->operand_size){
-		case 0:
-			printf("%04x", imm);
-			cpu_push16(cpu, (uint16_t*)&imm);
-			cpu->eip += 3;
-			break;
-		case 1:
-			printf("%08x", imm);
-			cpu_push32(cpu, &imm);
-			cpu->eip += 5;
-			break;
+	case 0:
+		printf("%04x", imm);
+		cpu_push16(cpu, (uint16_t*)&imm);
+		cpu->eip += 3;
+		break;
+	case 1:
+		printf("%08x", imm);
+		cpu_push32(cpu, &imm);
+		cpu->eip += 5;
+		break;
 	}
 }
 
@@ -324,6 +467,11 @@ void op_6A(i386* cpu){ //push imm8
 	cpu->eip += 2;
 }
 
+void op_74(i386* cpu){ //JE rel8
+	printf("JE ");
+	cjmp(cpu->eflags & 0x40);
+}
+
 void op_83(i386* cpu){ //op r/m16, imm8
 	get_modrm();
 	printf("%s ", arith_family_names[REG(modrm)]);
@@ -338,6 +486,16 @@ void op_83(i386* cpu){ //op r/m16, imm8
 	finish_op(arith_family_fns_16[REG(modrm)], arith_family_fns_32[REG(modrm)]);
 }
 
+void op_85(i386* cpu){ //test r/m32, r32
+	printf("TEST ");
+	get_modrm();
+	get_modrm_src_reg_1632();
+	cpu->eip += 2;
+	get_modrm_dst_ptr(1);
+	finish_op(cpu_and16, cpu_and32);
+	printf("%s", tables[cpu->operand_size][REG(modrm)]);
+}
+
 void op_89(i386* cpu){ //MOV r/m32, r32
 	printf("MOV ");
 
@@ -348,6 +506,41 @@ void op_89(i386* cpu){ //MOV r/m32, r32
 	finish_op(cpu_mov16, cpu_mov32);
 
 	printf("%s", tables[cpu->operand_size][REG(modrm)]);
+}
+
+void op_8B(i386* cpu){ //MOV r32, r/m32
+	printf("MOV ");
+	get_modrm();
+	get_modrm_src_reg_1632();
+	printf("%s, ", tables[cpu->operand_size][REG(modrm)]);
+	cpu->eip += 2;
+	get_modrm_dst_ptr(0);
+	finish_op_swap(cpu_mov16, cpu_mov32);
+}
+
+void op_8D(i386* cpu){ //LEA r32, m
+	get_modrm();
+	printf("LEA %s, ", reg_names_32[REG(modrm)]);
+	cpu->eip += 2;
+	uint32_t addr = calc_modrm_addr(cpu, modrm);
+	uint32_t* dst_ptr = get_reg_1632(cpu, REG(modrm));
+	*dst_ptr = addr;
+}
+
+void op_A1(i386* cpu){
+	cpu->eip++;
+	uint32_t addr = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->eip);
+	printf("MOV EAX, [%p]", addr);
+	cpu->eax = *(uint32_t*)virtual_to_physical_addr(cpu, addr);
+	cpu->eip += 4;
+}
+
+void op_A3(i386* cpu){ //MOV [imm32], eax
+	cpu->eip++;
+	uint32_t addr = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->eip);
+	printf("MOV [%p], EAX", addr);
+	*(uint32_t*)virtual_to_physical_addr(cpu, addr) = cpu->eax;
+	cpu->eip += 4;
 }
 
 void op_B8(i386* cpu){ //MOV EAX, imm32
@@ -369,9 +562,48 @@ void op_B8(i386* cpu){ //MOV EAX, imm32
 	}
 }
 
+void op_C2(i386* cpu){ //ret imm16
+	cpu->eip++;
+	printf("RET ");
+	uint16_t imm16 = *(uint16_t*)virtual_to_physical_addr(cpu, cpu->eip);
+	printf("%04x", imm16);
+	cpu->eip = cpu_pop32(cpu);
+	cpu_dump(cpu);
+	cpu->esp += imm16;
+}
+
 void op_C3(i386* cpu){ //ret
 	printf("RET");
 	cpu->eip = cpu_pop32(cpu);
+}
+
+void op_C7(i386* cpu){ //MOV r/m32, imm32
+	uint32_t* src_ptr;
+	get_modrm();
+	cpu->eip += 2;
+	printf("MOV ");
+	get_modrm_dst_ptr(0);
+	printf(", ");
+	src_ptr = (uint32_t*)virtual_to_physical_addr(cpu, cpu->eip);
+	finish_op(cpu_mov16, cpu_mov32);
+
+	switch (cpu->operand_size){
+		case 0:
+			cpu->eip += 2;
+			printf("%04x", *src_ptr);
+			break;
+		case 1:
+			cpu->eip += 4;
+			printf("%08x", *src_ptr);
+			break;
+	}
+}
+
+void op_C9(i386* cpu){ //leave
+	printf("LEAVE");
+	cpu->esp = cpu->ebp;
+	cpu->ebp = cpu_pop32(cpu);
+	cpu->eip++;
 }
 
 void op_CD(i386* cpu){ //int
@@ -416,10 +648,57 @@ void op_E8(i386* cpu){ //CALL rel16/rel32
 	cpu_call(cpu, &target);
 }
 
+void op_E9(i386* cpu){ //JMP rel16/rel32
+	printf("JMP ");
+	uint32_t imm = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->eip + 1);
+	uint32_t target;
+
+	switch (cpu->operand_size){
+	case 0:
+		cpu->eip += 3;
+		imm = (int32_t)(int16_t)imm;
+		break;
+	case 1:
+		cpu->eip += 5;
+		break;
+	}
+
+	target = cpu->eip + imm;
+
+	printf("%p", target);
+	cpu->eip = target;
+}
+
+void op_EB(i386* cpu){ //JMP rel8
+	printf("JMP ");
+	cjmp(1);
+}
+
 void op_F4(i386* cpu){
 	printf("HLT");
 	cpu->eip++;
 	cpu->running = 0;
+}
+
+void op_F7(i386* cpu){
+	uint32_t imm_val;
+	get_modrm();
+	printf("%s ", mul_family_names[REG(modrm)]);
+	cpu->eip += 2;
+	get_modrm_dst_ptr(0);
+
+	switch (REG(modrm)){
+		case 0:
+			imm_val = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->eip);
+			printf(", %p", imm_val);
+			alu_and32(cpu, *dst_ptr, imm_val);
+			cpu->eip += 4;
+			break;
+		default:
+			printf("%d", REG(modrm));
+			cpu->running = 0;
+			break;
+	}
 }
 
 void op_FF(i386* cpu){ //well this one does just about everything
@@ -519,22 +798,22 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x4d
 	0, //0x4e
 	0, //0x4f
-	0, //0x50
+	op_50, //0x50
 	0, //0x51
 	0, //0x52
-	0, //0x53
+	op_53, //0x53
 	0, //0x54
-	0, //0x55
-	0, //0x56
-	0, //0x57
+	op_55, //0x55
+	op_56, //0x56
+	op_57, //0x57
 	0, //0x58
 	0, //0x59
 	0, //0x5a
-	0, //0x5b
-	0, //0x5c
-	0, //0x5d
-	0, //0x5e
-	0, //0x5f
+	op_5B, //0x5b
+	op_5C, //0x5c
+	op_5D, //0x5d
+	op_5E, //0x5e
+	op_5F, //0x5f
 	0, //0x60
 	0, //0x61
 	0, //0x62
@@ -555,7 +834,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x71
 	0, //0x72
 	0, //0x73
-	0, //0x74
+	op_74, //0x74
 	0, //0x75
 	0, //0x76
 	0, //0x77
@@ -572,15 +851,15 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x82
 	op_83, //0x83
 	0, //0x84
-	0, //0x85
+	op_85, //0x85
 	0, //0x86
 	0, //0x87
 	0, //0x88
 	op_89, //0x89
 	0, //0x8a
-	0, //0x8b
+	op_8B, //0x8b
 	0, //0x8c
-	0, //0x8d
+	op_8D, //0x8d
 	0, //0x8e
 	0, //0x8f
 	0, //0x90
@@ -600,9 +879,9 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x9e
 	0, //0x9f
 	0, //0xa0
-	0, //0xa1
+	op_A1, //0xa1
 	0, //0xa2
-	0, //0xa3
+	op_A3, //0xa3
 	0, //0xa4
 	0, //0xa5
 	0, //0xa6
@@ -633,14 +912,14 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0xbf
 	0, //0xc0
 	0, //0xc1
-	0, //0xc2
+	op_C2, //0xc2
 	op_C3, //0xc3
 	0, //0xc4
 	0, //0xc5
 	0, //0xc6
-	0, //0xc7
+	op_C7, //0xc7
 	0, //0xc8
-	0, //0xc9
+	op_C9, //0xc9
 	0, //0xca
 	0, //0xcb
 	0, //0xcc
@@ -672,9 +951,9 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0xe6
 	0, //0xe7
 	op_E8, //0xe8
-	0, //0xe9
+	op_E9, //0xe9
 	0, //0xea
-	0, //0xeb
+	op_EB, //0xeb
 	0, //0xec
 	0, //0xed
 	0, //0xee
@@ -686,7 +965,7 @@ void(*op_table[256])(i386* cpu) = {
 	op_F4, //0xf4
 	0, //0xf5
 	0, //0xf6
-	0, //0xf7
+	op_F7, //0xf7
 	0, //0xf8
 	0, //0xf9
 	0, //0xfa

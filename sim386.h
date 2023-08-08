@@ -11,6 +11,14 @@
 #define REG(modrm) ((modrm & 0x38) >> 3)
 #define RM(modrm) (modrm & 0x7)
 
+#define cjmp(cond)					uint32_t jump_target = cpu->eip + 2 + (int32_t)(int8_t)*virtual_to_physical_addr(cpu, cpu->eip + 1);\
+									printf("%p", jump_target); \
+									if (cond){ \
+										cpu->eip = jump_target; \
+									} else{ \
+										cpu->eip += 2; \
+									} \
+
 #define print_modrm()				printf("Mod=%d Reg=%d Rm=%d\n", MOD(modrm), REG(modrm), RM(modrm));
 
 #define get_modrm_src_reg_1632()	uint32_t* src_ptr = get_reg_1632(cpu, REG(modrm));
@@ -22,6 +30,15 @@
 										case 1: \
 											op32(cpu, dst_ptr, src_ptr); \
 											break; \
+									}
+
+#define finish_op_swap(op16, op32)		switch(cpu->operand_size){ \
+									case 0: \
+										op16(cpu, (uint16_t*)src_ptr, (uint16_t*)dst_ptr); \
+										break; \
+									case 1: \
+										op32(cpu, src_ptr, dst_ptr); \
+										break; \
 									}
 
 #define get_modrm_dst_ptr(c)		uint32_t* dst_ptr; \
