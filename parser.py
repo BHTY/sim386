@@ -8,27 +8,16 @@ def tokenize(string):
 tokens_to_ignore = ["WINUSERAPI", "WINAPI", "_In_", "_In_opt_", "("]
 
 function_decl = """WINUSERAPI
-HWND
+LRESULT
 WINAPI
-CreateWindowExA(
-    _In_ DWORD dwExStyle,
-    _In_opt_ LPCSTR lpClassName,
-    _In_opt_ LPCSTR lpWindowName,
-    _In_ DWORD dwStyle,
-    _In_ int X,
-    _In_ int Y,
-    _In_ int nWidth,
-    _In_ int nHeight,
-    _In_opt_ HWND hWndParent,
-    _In_opt_ HMENU hMenu,
-    _In_opt_ HINSTANCE hInstance,
-    _In_opt_ LPVOID lpParam);"""
+DispatchMessageA(
+    _In_ CONST MSG *lpMsg);"""
 
 class Argument:
-    def __init__(self, value_type, name):
-        self.name = name
-        self.value_type = value_type
-        self.is_pointer = self.value_type[0:2] == "LP"
+    def __init__(self, tokens):
+        self.name = tokens[-1]
+        self.value_type = " ".join(tokens[:-1])
+        self.is_pointer = (tokens[0][0:2] == "LP") or "*" in tokens
 
 
 def generate_fn_call(name, args):
@@ -45,7 +34,7 @@ def generate_fn_call(name, args):
 
 
 def generate_print_string(name, args):
-    out_string = '"Calling {}('.format(name)
+    out_string = '"\\nCalling {}('.format(name)
 
     for i in args:
         out_string += "%p, "
@@ -78,11 +67,11 @@ def parse(toks):
             continue
 
         elif i == ",":
-            args.append(Argument(current_arg[0], current_arg[1]))
+            args.append(Argument(current_arg))
             current_arg = []
 
         elif i == ")": #we're done here
-            args.append(Argument(current_arg[0], current_arg[1]))
+            args.append(Argument(current_arg))
             break
 
         else:
@@ -103,7 +92,7 @@ def parse(toks):
     function_text += "\tprintf({});\n".format(generate_print_string(function_name, args))
 
     if return_value:
-        function_text += "\treturn {}".format(generate_fn_call(function_name, args))
+        function_text += "\treturn (uint32_t){}".format(generate_fn_call(function_name, args))
     else:
         function_text += "\t{}\n\treturn;".format(generate_fn_call(function_name, args))
 
