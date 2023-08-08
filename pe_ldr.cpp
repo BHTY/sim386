@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <conio.h>
 
 #include "headers.h"
 #include "../sim386.h"
@@ -909,6 +910,13 @@ uint32_t debug_step(i386* cpu){
 
 	if (cpu->running){
 		cpu_step(cpu);
+	}
+
+	if (cpu->running && cpu->single_step == 0 & kbhit()){
+		getch();
+		printf("Break.\n");
+		cpu->running = 0;
+		cpu->single_step = 1;
 	}
 
 	if (cpu->fixing_breakpoint){ //return 0xCC to the breakpoint
