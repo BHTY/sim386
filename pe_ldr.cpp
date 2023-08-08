@@ -68,6 +68,8 @@ LOADED_PE_IMAGE* find_image(char* name){
 }
 
 LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam){
+	//return DefWindowProcA(hWnd, msg, wParam, lParam);
+
 	HRESULT return_value;
 	uint32_t wndproc_addr;
 	LPSTR name_buffer = (LPSTR)malloc(100);
@@ -75,20 +77,21 @@ LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	wndproc_addr = lookup_classname((char*)name_buffer);
 	free(name_buffer);
 
-	printf("\nCalling WndProc(%p, %p, %p, %p)", hWnd, msg, wParam, lParam);
+	printf("\nThunking WndProc(%p, %p, %p, %p)", hWnd, msg, wParam, lParam);
 
 	if (wndproc_addr){
 		//push the arguments onto the stack
-		cpu_push32(global_cpu, (uint32_t*)&hWnd);
-		cpu_push32(global_cpu, (uint32_t*)&msg);
-		cpu_push32(global_cpu, (uint32_t*)&wParam);
+		cpu_push32(global_cpu, &(global_cpu->eip));
 		cpu_push32(global_cpu, (uint32_t*)&lParam);
+		cpu_push32(global_cpu, (uint32_t*)&wParam);
+		cpu_push32(global_cpu, (uint32_t*)&msg);
+		cpu_push32(global_cpu, (uint32_t*)&hWnd);
 
 		//call the function
 		return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr); //it should return into the unthunker
 
 		//pop the arguments off of the stack
-		global_cpu->esp += 16;
+		//global_cpu->esp += 16;
 
 		printf(" Finished WndProc, EIP=%p!", global_cpu->eip);
 
@@ -238,6 +241,7 @@ uint32_t thunk_CreateWindowExA(i386* cpu){
 
 	uint32_t retval = (uint32_t)CreateWindowExA(dwExStyle, className, windowName, dwStyle, X, Y, nWidth, nHeight, (HWND)hWndParent, (HMENU)hMenu, (HINSTANCE)hInstance, param);
 	global = retval;
+	//printf("Window Handle: %d\n", retval);
 
 	return retval;
 }
@@ -346,15 +350,64 @@ uint32_t thunk_GetMessageA(i386* cpu){
 	return GetMessageA(pMsg, (HWND)hWnd, wMsgFilterMin, wMsgFilterMax);
 }
 
+uint32_t thunk_GetStockObject(i386* cpu){
+	uint32_t i = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling GetStockObject(%p)", i);
+	return (uint32_t)GetStockObject((int)i);
+}
+
+uint32_t thunk_PostQuitMessage(i386* cpu){
+	uint32_t nExitCode = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling PostQuitMessage(%p)", nExitCode);
+	//PostQuitMessage((int)nExitCode);
+	return 0;
+}
+
+uint32_t thunk_EndPaint(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpPaint = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	CONST PAINTSTRUCT * _lpPaint = (CONST PAINTSTRUCT *)virtual_to_physical_addr(cpu, lpPaint);
+	printf("\nCalling EndPaint(%p, %p)", hWnd, lpPaint);
+	return (uint32_t)EndPaint((HWND)hWnd, (CONST PAINTSTRUCT *)_lpPaint);
+}
+
+uint32_t thunk_DrawTextA(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpchText = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t cchText = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lprc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t format = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	LPCSTR _lpchText = (LPCSTR)virtual_to_physical_addr(cpu, lpchText);
+	LPRECT _lprc = (LPRECT)virtual_to_physical_addr(cpu, lprc);
+	printf("\nCalling DrawTextA(%p, %p, %p, %p, %p)", hdc, lpchText, cchText, lprc, format);
+	return (uint32_t)DrawTextA((HDC)hdc, (LPCSTR)_lpchText, (int)cchText, (LPRECT)_lprc, (UINT)format);
+}
+
+uint32_t thunk_GetClientRect(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpRect = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	LPRECT _lpRect = (LPRECT)virtual_to_physical_addr(cpu, lpRect);
+	printf("\nCalling GetClientRect(%p, %p)", hWnd, lpRect);
+	return (uint32_t)GetClientRect((HWND)hWnd, (LPRECT)_lpRect);
+}
+
+uint32_t thunk_BeginPaint(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpPaint = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	LPPAINTSTRUCT _lpPaint = (LPPAINTSTRUCT)virtual_to_physical_addr(cpu, lpPaint);
+	printf("\nCalling BeginPaint(%p, %p)", hWnd, lpPaint);
+	return (uint32_t)BeginPaint((HWND)hWnd, (LPPAINTSTRUCT)_lpPaint);
+}
+
 uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA,
 									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA,
-									   thunk_RegisterClassExA, thunk_GetMessageA};
+									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint};
 
 void handle_syscall(i386* cpu){
 	int function_id = cpu->eax;
 
 	if (thunk_table[function_id] == 0){
-		printf("\nUnimplemented thunk %d!", function_id);
+		printf("\nUnimplemented thunk %x!", function_id);
 		cpu->running = 0;
 	}
 	else{
@@ -958,7 +1011,7 @@ int main(int argc, char* argv[])
 
 	i386 CPU;
 	cpu_init(&CPU);
-	LOADED_PE_IMAGE hello = load_pe_file("C:\\Users\\Will\\peldr\\hello.exe");
+	LOADED_PE_IMAGE hello = load_pe_file("C:\\Users\\Will\\peldr\\hellowin.exe");
 	parse_headers(&hello, &CPU);
 	CPU.running = 0;
 	CPU.single_step = 1;

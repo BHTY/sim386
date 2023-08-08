@@ -5,13 +5,13 @@ def tokenize(string):
     tokens = re.findall("[__#a-zA-Z][__#a-zA-Z0-9]*|->|\".*\"|==|@|!=|>=|<=|&&|\\|\\||_?\\d+|[+\-*/=!<>()[\\]{},.;:$&\\|]|'.*'|\".*\"", string)
     return tokens
 
-tokens_to_ignore = ["WINUSERAPI", "WINAPI", "_In_", "_In_opt_", "("]
+tokens_to_ignore = ["WINUSERAPI", "WINGDIAPI", "WINAPI", "_Out_", "_In_", "_In_opt_", "("]
 
 function_decl = """WINUSERAPI
-LRESULT
+VOID
 WINAPI
-DispatchMessageA(
-    _In_ CONST MSG *lpMsg);"""
+PostQuitMessage(
+    _In_ int nExitCode);"""
 
 class Argument:
     def __init__(self, tokens):
@@ -94,7 +94,7 @@ def parse(toks):
     if return_value:
         function_text += "\treturn (uint32_t){}".format(generate_fn_call(function_name, args))
     else:
-        function_text += "\t{}\n\treturn;".format(generate_fn_call(function_name, args))
+        function_text += "\t{}\n\treturn 0;".format(generate_fn_call(function_name, args))
 
     function_text += "\n}"
 

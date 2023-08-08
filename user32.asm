@@ -82,7 +82,7 @@ RegisterClassA:
 CreateWindowExA:
 	mov eax, THUNK_USER32_CREATEWINDOWEXA
 	int SYSCALL_THUNK
-	ret 0x0C
+	ret 0x30
 
 ShowWindow:
 	mov eax, THUNK_USER32_SHOWWINDOW
@@ -124,6 +124,52 @@ GetMessageA:
 	int SYSCALL_THUNK
 	ret 0x10
 
+global PostQuitMessage
+extern PostQuitMessage
+export PostQuitMessage
+
+PostQuitMessage:
+	mov eax, THUNK_USER32_POSTQUITMESSAGE
+	int SYSCALL_THUNK
+	ret 0x04
+
+global EndPaint
+extern EndPaint
+export EndPaint
+
+EndPaint:
+	mov eax, THUNK_USER32_ENDPAINT
+	int SYSCALL_THUNK
+	ret 0x08
+
+global DrawTextA
+extern DrawTextA
+export DrawTextA
+
+DrawTextA:
+	mov eax, THUNK_USER32_DRAWTEXTA
+	int SYSCALL_THUNK
+	ret 0x14
+
+global GetClientRect
+extern GetClientRect
+export GetClientRect
+
+GetClientRect:
+	mov eax, THUNK_USER32_GETCLIENTRECT
+	int SYSCALL_THUNK
+	ret 0x08
+
+global BeginPaint
+extern BeginPaint
+export BeginPaint
+
+BeginPaint:
+	mov eax, THUNK_USER32_BEGINPAINT
+	int SYSCALL_THUNK
+	ret 0x08
+
+
 THUNK_USER32_MESSAGEBOXA equ 0x00
 THUNK_USER32_LOADCURSORA equ 0x04
 THUNK_USER32_LOADICONA equ 0x05
@@ -137,4 +183,9 @@ THUNK_USER32_TRANSLATEMESSAGE equ 0x0C
 THUNK_USER32_DISPATCHMESSAGEA equ 0x0D
 THUNK_USER32_REGISTERCLASSEXA equ 0x10
 THUNK_USER32_GETMESSAGEA equ 0x11
+THUNK_USER32_POSTQUITMESSAGE equ 0x13
+THUNK_USER32_ENDPAINT equ 0x14
+THUNK_USER32_DRAWTEXTA equ 0x15
+THUNK_USER32_GETCLIENTRECT equ 0x16
+THUNK_USER32_BEGINPAINT equ 0x17
 SYSCALL_THUNK equ 0x80

@@ -42,6 +42,11 @@ uint32_t alu_add32(i386* cpu, uint32_t a, uint32_t b){ //also has to set flags
 	return result;
 }
 
+uint32_t alu_xor32(i386* cpu, uint32_t a, uint32_t b){ //also has to set flags
+	uint32_t result = a ^ b;
+	return result;
+}
+
 void cpu_mov16(i386* cpu, uint16_t* dst_ptr, uint16_t* src_ptr){
 	*dst_ptr = *src_ptr;
 }
@@ -118,8 +123,7 @@ void cpu_sub32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
 }
 
 void cpu_xor32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
-	printf("32-bit XOR is unimplemented!");
-	cpu->running = 0;
+	*dst_ptr = alu_xor32(cpu, *dst_ptr, *src_ptr);
 }
 
 void cpu_cmp32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
@@ -327,6 +331,35 @@ void op_0F(i386* cpu){ //extended instruction prefix
 		printf("Unimplemented extended instruction 0x0F:%02x", opcode);
 		cpu->running = 0;
 	}
+}
+
+void op_25(i386* cpu){ //AND eax, imm32
+	cpu->eip++;
+	uint32_t imm = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->eip);
+	printf("AND ");
+
+	switch (cpu->operand_size){
+		case 0:
+			printf("AX, %04x", imm);
+			cpu_and16(cpu, &(cpu->ax), (uint16_t*)&imm);
+			cpu->eip += 2;
+			break;
+		case 1:
+			printf("EAX, %08x", imm);
+			cpu_and32(cpu, &(cpu->eax), &imm);
+			cpu->eip += 4;
+			break;
+	}
+}
+
+void op_33(i386* cpu){ //xor r32, r/m32
+	printf("XOR ");
+	get_modrm();
+	get_modrm_src_reg_1632();
+	printf("%s, ", tables[cpu->operand_size][REG(modrm)]);
+	cpu->eip += 2;
+	get_modrm_dst_ptr(0);
+	finish_op_swap(cpu_xor16, cpu_xor32);
 }
 
 void op_50(i386* cpu){ //push eax
@@ -651,8 +684,8 @@ void op_CD(i386* cpu){ //int
 
 	switch (interrupt_vector){
 		case 0x80:
-			handle_syscall(cpu);
 			cpu->eip += 2;
+			handle_syscall(cpu);
 			break;
 		case 0x03:
 			printf("Breakpoint hit");
@@ -765,6 +798,11 @@ void op_FF(i386* cpu){ //well this one does just about everything
 void extended_op_84(i386* cpu){
 	printf("JE ");
 	cjmpex(cpu->eflags & 0x40);
+}
+
+void extended_op_85(i386* cpu){
+	printf("JNE ");
+	cjmpex(!(cpu->eflags & 0x40));
 }
 
 void(*extended_op_table[256])(i386* cpu) = {
@@ -901,7 +939,7 @@ void(*extended_op_table[256])(i386* cpu) = {
 	0, //0x82
 	0, //0x83
 	extended_op_84, //0x84
-	0, //0x85
+	extended_op_85, //0x85
 	0, //0x86
 	0, //0x87
 	0, //0x88
@@ -1064,7 +1102,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x22
 	0, //0x23
 	0, //0x24
-	0, //0x25
+	op_25, //0x25
 	0, //0x26
 	0, //0x27
 	0, //0x28
@@ -1078,7 +1116,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x30
 	0, //0x31
 	0, //0x32
-	0, //0x33
+	op_33, //0x33
 	0, //0x34
 	0, //0x35
 	0, //0x36
@@ -1381,7 +1419,13 @@ void cpu_init(i386* cpu){
 }
 
 void cpu_step(i386* cpu){
- 	uint8_t byte = *(virtual_to_physical_addr(cpu, cpu->eip));
+	uint8_t* address_eip = (virtual_to_physical_addr(cpu, cpu->eip));
+
+	if (address_eip == 0){
+		return;
+	}
+
+	uint8_t byte = *address_eip;
 	printf("%p: ", cpu->eip);
 	cpu->breakpoint_hit = 0;
 
@@ -1418,9 +1462,10 @@ extern uint32_t debug_step(i386*);
 
 uint32_t cpu_reversethunk(i386* cpu, uint32_t target_addr, uint32_t escape_addr){
 	cpu_push32(cpu, &escape_addr); //push return address
-	cpu->eip = target_addr;
 
-	printf("\nReverse thunking to address %p! (ESP=%p)\n", target_addr, cpu->esp);
+	printf("\nReverse thunking to address %p! (EIP=%p ESP=%p)\n", target_addr, cpu->eip, cpu->esp);
+
+	cpu->eip = target_addr;
 
 	//step through the code
 	while (1){
@@ -1429,8 +1474,8 @@ uint32_t cpu_reversethunk(i386* cpu, uint32_t target_addr, uint32_t escape_addr)
 		}
 	}
 
-	printf("Reverse thunk done, returning %p (ESP=%p).", cpu->eax, cpu->esp);
-	cpu->eip -= 2;
+	printf("Reverse thunk done, returning %p (EIP=%p ESP=%p).", cpu->eax, cpu->eip, cpu->esp);
+	//cpu->eip -= 2;
 
 	return cpu->eax;
 }
