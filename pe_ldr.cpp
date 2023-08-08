@@ -769,6 +769,8 @@ uint32_t debug_step(i386* cpu){
 		gets(buf);
 		sscanf(buf, "%s %x %x", option, &value, &value_2);
 
+		if (strlen(buf) == 0) return 0;
+
 		if (strcmp(option, "dr") == 0){ //dump registers
 			cpu_dump(cpu);
 		}
