@@ -19,6 +19,23 @@
 										cpu->eip += 2; \
 									} \
 
+#define cjmpex(cond)				uint32_t imm = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->eip + 1); \
+									uint32_t jump_target; \
+									switch(cpu->operand_size){ \
+										case 0: \
+											cpu->eip += 3; \
+											jump_target = cpu->eip + (int32_t)(int16_t)imm; \
+											break; \
+										case 1: \
+											cpu->eip += 5; \
+											jump_target = cpu->eip + imm; \
+											break; \
+									} \
+									printf("%p", jump_target); \
+									if (cond){\
+										cpu->eip = jump_target; \
+									}
+
 #define print_modrm()				printf("Mod=%d Reg=%d Rm=%d\n", MOD(modrm), REG(modrm), RM(modrm));
 
 #define get_modrm_src_reg_1632()	uint32_t* src_ptr = get_reg_1632(cpu, REG(modrm));
@@ -62,6 +79,12 @@ typedef struct{
 typedef struct{
 	i386_PT* entries[1024];
 } i386_PD;
+
+typedef struct BREAKPOINT{
+	uint32_t addr;
+	uint8_t value;
+	struct BREAKPOINT* next;
+} BREAKPOINT;
 
 typedef struct{
 	struct{
@@ -148,6 +171,11 @@ typedef struct{
 	int operand_size; //0 for 16-bit, 1 for 32-bit
 
 	i386_PD page_dir;
+	BREAKPOINT* breakpoint;
+	int breakpoint_hit;
+	int single_step;
+	int fixing_breakpoint;
+	int escaping;
 } i386; //address size?
 
 void map_section(i386* cpu, uint32_t vaddr, uint8_t* paddr, uint32_t size);
@@ -157,3 +185,9 @@ void cpu_init(i386* cpu);
 void cpu_step(i386* cpu);
 void cpu_dump(i386* cpu);
 void handle_syscall(i386* cpu);
+void set_reg(i386*, char*, uint32_t);
+void cpu_trace(i386*);
+uint32_t cpu_reversethunk(i386* cpu, uint32_t target_addr, uint32_t escape_addr);
+void cpu_push32(i386* cpu, uint32_t *val);
+
+extern void(*extended_op_table[256])(i386* cpu);

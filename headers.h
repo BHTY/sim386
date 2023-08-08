@@ -49,9 +49,14 @@ typedef struct{
 	EXPORTED_FUNCTION *export_table;
 } LOADED_PE_IMAGE;
 
-
 typedef struct LOADED_IMAGE{
 	LOADED_PE_IMAGE image;
 	char* name;
 	struct LOADED_IMAGE* next;
 } LOADED_IMAGE;
+
+typedef struct WINDOW_CLASS{
+	uint32_t WndProc;
+	char class_name[100];
+	struct WINDOW_CLASS* next;
+} WINDOW_CLASS;

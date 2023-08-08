@@ -284,6 +284,7 @@ uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr){
 
 	if (cpu->page_dir.entries[pde] == 0 || cpu->page_dir.entries[pde]->entries[pte] == 0){
 		printf("Page fault accessing address %p.\n", vaddr);
+		cpu_dump(cpu);
 		cpu->running = 0;
 		return 0;
 	}
@@ -313,6 +314,18 @@ void map_section(i386* cpu, uint32_t vaddr, uint8_t* paddr, uint32_t size){
 	//work in 4K blocks
 	for (int i = 0; i < size; i += 4096){
 		virtual_mmap(cpu, vaddr + i, paddr + i);
+	}
+}
+
+void op_0F(i386* cpu){ //extended instruction prefix
+	cpu->eip++;
+	uint8_t opcode = *virtual_to_physical_addr(cpu, cpu->eip);
+
+	if (extended_op_table[opcode]){
+		extended_op_table[opcode](cpu);
+	} else{
+		printf("Unimplemented extended instruction 0x0F:%02x", opcode);
+		cpu->running = 0;
 	}
 }
 
@@ -472,6 +485,26 @@ void op_74(i386* cpu){ //JE rel8
 	cjmp(cpu->eflags & 0x40);
 }
 
+void op_81(i386* cpu){ //op r/m16, imm16/32
+	get_modrm();
+	printf("%s ", arith_family_names[REG(modrm)]);
+	cpu->eip += 2;
+	get_modrm_dst_ptr(1);
+
+	uint32_t imm = *(uint32_t*)(virtual_to_physical_addr(cpu, cpu->eip));
+	uint32_t *src_ptr = &imm;
+	printf("%08x", imm);
+
+	switch (cpu->operand_size){
+		case 0:
+			cpu->eip += 2;
+		case 1:
+			cpu->eip += 4;
+	}
+
+	finish_op(arith_family_fns_16[REG(modrm)], arith_family_fns_32[REG(modrm)]);
+}
+
 void op_83(i386* cpu){ //op r/m16, imm8
 	get_modrm();
 	printf("%s ", arith_family_names[REG(modrm)]);
@@ -568,7 +601,7 @@ void op_C2(i386* cpu){ //ret imm16
 	uint16_t imm16 = *(uint16_t*)virtual_to_physical_addr(cpu, cpu->eip);
 	printf("%04x", imm16);
 	cpu->eip = cpu_pop32(cpu);
-	cpu_dump(cpu);
+	//cpu_dump(cpu);
 	cpu->esp += imm16;
 }
 
@@ -606,6 +639,12 @@ void op_C9(i386* cpu){ //leave
 	cpu->eip++;
 }
 
+void op_CC(i386* cpu){ //int3
+	printf("Breakpoint hit");
+	cpu->running = 0;
+	cpu->breakpoint_hit = 1;
+}
+
 void op_CD(i386* cpu){ //int
 	uint8_t interrupt_vector = *virtual_to_physical_addr(cpu, cpu->eip + 1);
 	printf("INT %02x", interrupt_vector);
@@ -613,18 +652,24 @@ void op_CD(i386* cpu){ //int
 	switch (interrupt_vector){
 		case 0x80:
 			handle_syscall(cpu);
+			cpu->eip += 2;
 			break;
 		case 0x03:
-			printf("Debug exception.");
+			printf("Breakpoint hit");
 			cpu->running = 0;
+			cpu->breakpoint_hit = 1;
+			break;
+		case 0xFF:
+			printf("\nReverse-reverse thunking.");
+			cpu->eip += 2;
+			cpu->running = 0;
+			cpu->escaping = 1;
 			break;
 		default:
 			printf("Unknown interrupt vector.");
 			cpu->running = 0;
 			break;
 	}
-
-	cpu->eip += 2;
 }
 
 void op_E8(i386* cpu){ //CALL rel16/rel32
@@ -717,7 +762,12 @@ void op_FF(i386* cpu){ //well this one does just about everything
 	
 }
 
-void(*op_table[256])(i386* cpu) = {
+void extended_op_84(i386* cpu){
+	printf("JE ");
+	cjmpex(cpu->eflags & 0x40);
+}
+
+void(*extended_op_table[256])(i386* cpu) = {
 	0, //0x0
 	0, //0x1
 	0, //0x2
@@ -734,6 +784,265 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0xd
 	0, //0xe
 	0, //0xf
+	0, //0x10
+	0, //0x11
+	0, //0x12
+	0, //0x13
+	0, //0x14
+	0, //0x15
+	0, //0x16
+	0, //0x17
+	0, //0x18
+	0, //0x19
+	0, //0x1a
+	0, //0x1b
+	0, //0x1c
+	0, //0x1d
+	0, //0x1e
+	0, //0x1f
+	0, //0x20
+	0, //0x21
+	0, //0x22
+	0, //0x23
+	0, //0x24
+	0, //0x25
+	0, //0x26
+	0, //0x27
+	0, //0x28
+	0, //0x29
+	0, //0x2a
+	0, //0x2b
+	0, //0x2c
+	0, //0x2d
+	0, //0x2e
+	0, //0x2f
+	0, //0x30
+	0, //0x31
+	0, //0x32
+	0, //0x33
+	0, //0x34
+	0, //0x35
+	0, //0x36
+	0, //0x37
+	0, //0x38
+	0, //0x39
+	0, //0x3a
+	0, //0x3b
+	0, //0x3c
+	0, //0x3d
+	0, //0x3e
+	0, //0x3f
+	0, //0x40
+	0, //0x41
+	0, //0x42
+	0, //0x43
+	0, //0x44
+	0, //0x45
+	0, //0x46
+	0, //0x47
+	0, //0x48
+	0, //0x49
+	0, //0x4a
+	0, //0x4b
+	0, //0x4c
+	0, //0x4d
+	0, //0x4e
+	0, //0x4f
+	0, //0x50
+	0, //0x51
+	0, //0x52
+	0, //0x53
+	0, //0x54
+	0, //0x55
+	0, //0x56
+	0, //0x57
+	0, //0x58
+	0, //0x59
+	0, //0x5a
+	0, //0x5b
+	0, //0x5c
+	0, //0x5d
+	0, //0x5e
+	0, //0x5f
+	0, //0x60
+	0, //0x61
+	0, //0x62
+	0, //0x63
+	0, //0x64
+	0, //0x65
+	0, //0x66
+	0, //0x67
+	0, //0x68
+	0, //0x69
+	0, //0x6a
+	0, //0x6b
+	0, //0x6c
+	0, //0x6d
+	0, //0x6e
+	0, //0x6f
+	0, //0x70
+	0, //0x71
+	0, //0x72
+	0, //0x73
+	0, //0x74
+	0, //0x75
+	0, //0x76
+	0, //0x77
+	0, //0x78
+	0, //0x79
+	0, //0x7a
+	0, //0x7b
+	0, //0x7c
+	0, //0x7d
+	0, //0x7e
+	0, //0x7f
+	0, //0x80
+	0, //0x81
+	0, //0x82
+	0, //0x83
+	extended_op_84, //0x84
+	0, //0x85
+	0, //0x86
+	0, //0x87
+	0, //0x88
+	0, //0x89
+	0, //0x8a
+	0, //0x8b
+	0, //0x8c
+	0, //0x8d
+	0, //0x8e
+	0, //0x8f
+	0, //0x90
+	0, //0x91
+	0, //0x92
+	0, //0x93
+	0, //0x94
+	0, //0x95
+	0, //0x96
+	0, //0x97
+	0, //0x98
+	0, //0x99
+	0, //0x9a
+	0, //0x9b
+	0, //0x9c
+	0, //0x9d
+	0, //0x9e
+	0, //0x9f
+	0, //0xa0
+	0, //0xa1
+	0, //0xa2
+	0, //0xa3
+	0, //0xa4
+	0, //0xa5
+	0, //0xa6
+	0, //0xa7
+	0, //0xa8
+	0, //0xa9
+	0, //0xaa
+	0, //0xab
+	0, //0xac
+	0, //0xad
+	0, //0xae
+	0, //0xaf
+	0, //0xb0
+	0, //0xb1
+	0, //0xb2
+	0, //0xb3
+	0, //0xb4
+	0, //0xb5
+	0, //0xb6
+	0, //0xb7
+	0, //0xb8
+	0, //0xb9
+	0, //0xba
+	0, //0xbb
+	0, //0xbc
+	0, //0xbd
+	0, //0xbe
+	0, //0xbf
+	0, //0xc0
+	0, //0xc1
+	0, //0xc2
+	0, //0xc3
+	0, //0xc4
+	0, //0xc5
+	0, //0xc6
+	0, //0xc7
+	0, //0xc8
+	0, //0xc9
+	0, //0xca
+	0, //0xcb
+	0, //0xcc
+	0, //0xcd
+	0, //0xce
+	0, //0xcf
+	0, //0xd0
+	0, //0xd1
+	0, //0xd2
+	0, //0xd3
+	0, //0xd4
+	0, //0xd5
+	0, //0xd6
+	0, //0xd7
+	0, //0xd8
+	0, //0xd9
+	0, //0xda
+	0, //0xdb
+	0, //0xdc
+	0, //0xdd
+	0, //0xde
+	0, //0xdf
+	0, //0xe0
+	0, //0xe1
+	0, //0xe2
+	0, //0xe3
+	0, //0xe4
+	0, //0xe5
+	0, //0xe6
+	0, //0xe7
+	0, //0xe8
+	0, //0xe9
+	0, //0xea
+	0, //0xeb
+	0, //0xec
+	0, //0xed
+	0, //0xee
+	0, //0xef
+	0, //0xf0
+	0, //0xf1
+	0, //0xf2
+	0, //0xf3
+	0, //0xf4
+	0, //0xf5
+	0, //0xf6
+	0, //0xf7
+	0, //0xf8
+	0, //0xf9
+	0, //0xfa
+	0, //0xfb
+	0, //0xfc
+	0, //0xfd
+	0, //0xfe
+	0, //0xff
+};
+
+void(*op_table[256])(i386* cpu) = {
+	0, //0x0
+	0, //0x1
+	0, //0x2
+	0, //0x3
+	0, //0x4
+	0, //0x5
+	0, //0x6
+	0, //0x7
+	0, //0x8
+	0, //0x9
+	0, //0xa
+	0, //0xb
+	0, //0xc
+	0, //0xd
+	0, //0xe
+	op_0F, //0xf
 	0, //0x10
 	0, //0x11
 	0, //0x12
@@ -847,7 +1156,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x7e
 	0, //0x7f
 	0, //0x80
-	0, //0x81
+	op_81, //0x81
 	0, //0x82
 	op_83, //0x83
 	0, //0x84
@@ -922,7 +1231,7 @@ void(*op_table[256])(i386* cpu) = {
 	op_C9, //0xc9
 	0, //0xca
 	0, //0xcb
-	0, //0xcc
+	op_CC, //0xcc
 	op_CD, //0xcd
 	0, //0xce
 	0, //0xcf
@@ -976,6 +1285,88 @@ void(*op_table[256])(i386* cpu) = {
 	op_FF, //0xff
 };
 
+void set_reg(i386* cpu, char* reg_name, uint32_t value){
+	for (int i = 0; i < strlen(reg_name); i++){ //convert to lower-case
+		*(reg_name + i) |= 0x20;
+	}
+
+	if (strcmp(reg_name, "ah") == 0){
+		cpu->ah = value;
+	}
+	else if (strcmp(reg_name, "al") == 0){
+		cpu->al = value;
+	}
+	else if (strcmp(reg_name, "bh") == 0){
+		cpu->bh = value;
+	}
+	else if (strcmp(reg_name, "bl") == 0){
+		cpu->bl = value;
+	}
+	else if (strcmp(reg_name, "cl") == 0){
+		cpu->cl = value;
+	}
+	else if (strcmp(reg_name, "ch") == 0){
+		cpu->ch = value;
+	}
+	else if (strcmp(reg_name, "dh") == 0){
+		cpu->dh = value;
+	}
+	else if (strcmp(reg_name, "dl") == 0){
+		cpu->dl = value;
+	}
+	else if (strcmp(reg_name, "ax") == 0){
+		cpu->ax = value;
+	}
+	else if (strcmp(reg_name, "bx") == 0){
+		cpu->bx = value;
+	}
+	else if (strcmp(reg_name, "cx") == 0){
+		cpu->cx = value;
+	}
+	else if (strcmp(reg_name, "dx") == 0){
+		cpu->dx = value;
+	}
+	else if (strcmp(reg_name, "si") == 0){
+		cpu->si = value;
+	}
+	else if (strcmp(reg_name, "di") == 0){
+		cpu->di = value;
+	}
+	else if (strcmp(reg_name, "bp") == 0){
+		cpu->bp = value;
+	}
+	else if (strcmp(reg_name, "sp") == 0){
+		cpu->sp = value;
+	}
+	else if (strcmp(reg_name, "eax") == 0){
+		cpu->eax = value;
+	}
+	else if (strcmp(reg_name, "ebx") == 0){
+		cpu->ebx = value;
+	}
+	else if (strcmp(reg_name, "ecx") == 0){
+		cpu->ecx = value;
+	}
+	else if (strcmp(reg_name, "edx") == 0){
+		cpu->edx = value;
+	}
+	else if (strcmp(reg_name, "esi") == 0){
+		cpu->esi = value;
+	}
+	else if (strcmp(reg_name, "edi") == 0){
+		cpu->edi = value;
+	}
+	else if (strcmp(reg_name, "ebp") == 0){
+		cpu->ebp = value;
+	}
+	else if (strcmp(reg_name, "esp") == 0){
+		cpu->esp = value;
+	}
+	else{
+		printf("Unknown register %s\n", reg_name);
+	}
+}
+
 void cpu_dump(i386* cpu){
 	printf("EAX=%08x EBX=%08x ECX=%08x EDX=%08x EFLAGS=%08x\n", cpu->eax, cpu->ebx, cpu->ecx, cpu->edx, cpu->eflags);
 	printf("ESI=%08x EDI=%08x ESP=%08x EBP=%08x EIP=%08x\n", cpu->esi, cpu->edi, cpu->esp, cpu->ebp, cpu->eip);
@@ -992,6 +1383,7 @@ void cpu_init(i386* cpu){
 void cpu_step(i386* cpu){
  	uint8_t byte = *(virtual_to_physical_addr(cpu, cpu->eip));
 	printf("%p: ", cpu->eip);
+	cpu->breakpoint_hit = 0;
 
 	if (op_table[byte] == 0){
 		printf("Unimplemented instruction %x at %08x\n", byte, cpu->eip);
@@ -1002,4 +1394,43 @@ void cpu_step(i386* cpu){
 	}
 
 	printf("\n");
+}
+
+void cpu_trace(i386* cpu){
+	uint32_t EBP = cpu->ebp;
+	uint32_t EIP = cpu->eip;
+	uint32_t tmp;
+
+	printf("%p\n", EIP);
+
+	while (EBP){
+		tmp = *(uint32_t*)virtual_to_physical_addr(cpu, EBP + 4);
+		if (tmp){
+			printf("%p\n", tmp);
+		} else{
+			break;
+		}
+		EBP = *(uint32_t*)virtual_to_physical_addr(cpu, EBP);
+	}
+}
+
+extern uint32_t debug_step(i386*);
+
+uint32_t cpu_reversethunk(i386* cpu, uint32_t target_addr, uint32_t escape_addr){
+	cpu_push32(cpu, &escape_addr); //push return address
+	cpu->eip = target_addr;
+
+	printf("\nReverse thunking to address %p! (ESP=%p)\n", target_addr, cpu->esp);
+
+	//step through the code
+	while (1){
+		if (debug_step(cpu)){
+			break;
+		}
+	}
+
+	printf("Reverse thunk done, returning %p (ESP=%p).", cpu->eax, cpu->esp);
+	cpu->eip -= 2;
+
+	return cpu->eax;
 }

@@ -17,6 +17,40 @@
 #include "../sim386.h"
 
 LOADED_IMAGE* loaded_images;
+WINDOW_CLASS* window_classes;
+
+uint32_t escape_addr;
+i386* global_cpu;
+
+uint32_t lookup_classname(char* class_name){ //returns a pointer to the WndProc
+	WINDOW_CLASS* temp = window_classes;
+
+	while (temp){
+		if (strcmp(class_name, temp->class_name) == 0){ //match found
+			return temp->WndProc;
+		}
+		temp = temp->next;
+	}
+	return 0;
+}
+
+void register_window_class(char* class_name, uint32_t WndProc){
+	WINDOW_CLASS* temp;
+
+	if (window_classes == 0){
+		window_classes = (WINDOW_CLASS*)malloc(sizeof(WINDOW_CLASS));
+		window_classes->next = 0;
+		window_classes->WndProc = WndProc;
+		strcpy(window_classes->class_name, class_name);
+	}
+	else{
+		temp = window_classes;
+		window_classes = (WINDOW_CLASS*)malloc(sizeof(WINDOW_CLASS));
+		window_classes->next = temp;
+		window_classes->WndProc = WndProc;
+		strcpy(window_classes->class_name, class_name);
+	}
+}
 
 LOADED_PE_IMAGE* find_image(char* name){
 	LOADED_IMAGE* cur = loaded_images;
@@ -33,7 +67,35 @@ LOADED_PE_IMAGE* find_image(char* name){
 }
 
 LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam){
-	return DefWindowProc(hWnd, msg, wParam, lParam);
+	HRESULT return_value;
+	uint32_t wndproc_addr;
+	LPSTR name_buffer = (LPSTR)malloc(100);
+	GetClassNameA(hWnd, name_buffer, 100);
+	wndproc_addr = lookup_classname((char*)name_buffer);
+	free(name_buffer);
+
+	printf("\nCalling WndProc(%p, %p, %p, %p)", hWnd, msg, wParam, lParam);
+
+	if (wndproc_addr){
+		//push the arguments onto the stack
+		cpu_push32(global_cpu, (uint32_t*)&hWnd);
+		cpu_push32(global_cpu, (uint32_t*)&msg);
+		cpu_push32(global_cpu, (uint32_t*)&wParam);
+		cpu_push32(global_cpu, (uint32_t*)&lParam);
+
+		//call the function
+		return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr); //it should return into the unthunker
+
+		//pop the arguments off of the stack
+		global_cpu->esp += 16;
+
+		printf(" Finished WndProc, EIP=%p!", global_cpu->eip);
+
+		return return_value;
+	}
+	else{
+		return DefWindowProcA(hWnd, msg, wParam, lParam);
+	}
 }
 
 uint32_t thunk_MessageBoxA(i386* cpu){
@@ -127,20 +189,23 @@ uint32_t thunk_RegisterClassA(i386* cpu){
 	uint32_t lpWndClass = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	WNDCLASSA* wc = (WNDCLASSA*)virtual_to_physical_addr(cpu, lpWndClass);
 
-	wc->lpfnWndProc = dummy_WndProc;
-
 	if (wc->lpszClassName){
 		wc->lpszClassName = (LPCSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszClassName);
+		register_window_class((char*)wc->lpszClassName, (uint32_t)wc->lpfnWndProc);
 	}
 
 	if (wc->lpszMenuName){
 		wc->lpszMenuName = (LPCSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszMenuName);
 	}
 
+	wc->lpfnWndProc = dummy_WndProc;
+
 	printf("\nCalling RegisterClassA(%p)", lpWndClass);
 
 	return RegisterClassA(wc);
 }
+
+uint32_t global;
 
 uint32_t thunk_CreateWindowExA(i386* cpu){
 	uint32_t dwExStyle = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
@@ -170,7 +235,10 @@ uint32_t thunk_CreateWindowExA(i386* cpu){
 		className = (LPCSTR)virtual_to_physical_addr(cpu, lpClassName);
 	}
 
-	return (uint32_t)CreateWindowExA(dwExStyle, className, windowName, dwStyle, X, Y, nWidth, nHeight, (HWND)hWndParent, (HMENU)hMenu, (HINSTANCE)hInstance, param);
+	uint32_t retval = (uint32_t)CreateWindowExA(dwExStyle, className, windowName, dwStyle, X, Y, nWidth, nHeight, (HWND)hWndParent, (HMENU)hMenu, (HINSTANCE)hInstance, param);
+	global = retval;
+
+	return retval;
 }
 
 uint32_t thunk_ShowWindow(i386* cpu){
@@ -214,6 +282,20 @@ uint32_t thunk_PeekMessageA(i386* cpu){
 	return PeekMessageA(pMsg, (HWND)hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg);
 }
 
+uint32_t thunk_TranslateMessage(i386* cpu){
+	uint32_t lpMsg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	CONST MSG * _lpMsg = (CONST MSG *)virtual_to_physical_addr(cpu, lpMsg);
+	printf("\nCalling TranslateMessage(%p)", lpMsg);
+	return (uint32_t)TranslateMessage((CONST MSG *)_lpMsg);
+}
+
+uint32_t thunk_DispatchMessageA(i386* cpu){
+	uint32_t lpMsg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	CONST MSG * _lpMsg = (CONST MSG *)virtual_to_physical_addr(cpu, lpMsg);
+	printf("\nCalling DispatchMessageA(%p)", lpMsg);
+	return (uint32_t)DispatchMessageA((CONST MSG *)_lpMsg);
+}
+
 uint32_t thunk_GetCommandLineA(i386* cpu){
 	printf("\nCalling GetCommandLineA()");
 
@@ -234,24 +316,38 @@ uint32_t thunk_RegisterClassExA(i386* cpu){
 	uint32_t lpWndClass = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	WNDCLASSEXA* wc = (WNDCLASSEXA*)virtual_to_physical_addr(cpu, lpWndClass);
 
-	wc->lpfnWndProc = dummy_WndProc;
-
 	if (wc->lpszClassName){
 		wc->lpszClassName = (LPCSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszClassName);
+		register_window_class((char*)wc->lpszClassName, (uint32_t)wc->lpfnWndProc);
 	}
 
 	if (wc->lpszMenuName){
 		wc->lpszMenuName = (LPCSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszMenuName);
 	}
 
+	wc->lpfnWndProc = dummy_WndProc;
+
 	printf("\nCalling RegisterClassExA(%p)", lpWndClass);
 
 	return RegisterClassExA(wc);
 }
 
+uint32_t thunk_GetMessageA(i386* cpu){
+	uint32_t lpMsg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t hWnd = global;//*(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t wMsgFilterMin = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t wMsgFilterMax = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+
+	printf("\nCalling GetMessageA(%p, %p, %p, %p)", lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax);
+
+	LPMSG pMsg = (LPMSG)virtual_to_physical_addr(cpu, lpMsg);
+
+	return GetMessageA(pMsg, (HWND)hWnd, wMsgFilterMin, wMsgFilterMax);
+}
+
 uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA,
-									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, NULL, NULL, thunk_GetCommandLineA, thunk_GetStartupInfoA,
-									   thunk_RegisterClassExA};
+									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA,
+									   thunk_RegisterClassExA, thunk_GetMessageA};
 
 void handle_syscall(i386* cpu){
 	int function_id = cpu->eax;
@@ -262,7 +358,7 @@ void handle_syscall(i386* cpu){
 	}
 	else{
 		cpu->eax = thunk_table[function_id](cpu);
-		printf(" and returning %08x", cpu->eax);
+		printf(" and returning %08x (EIP=%p)", cpu->eax, cpu->eip);
 	}
 }
 
@@ -627,6 +723,7 @@ void resolve_imports(LOADED_PE_IMAGE* image, i386* cpu){
 		//load the relevant PE image and then link your import table with their export table
 
 		while (function){
+			addr = 0x0;
 			printf("  (%p) ", image->image_base + function->address);
 
 			if (function->ordinal_or_name){
@@ -635,6 +732,7 @@ void resolve_imports(LOADED_PE_IMAGE* image, i386* cpu){
 			}
 			else{
 				printf("%d", function->ordinal);
+				addr = scan_export_table_for_ordinal(cur_image->export_table, function->ordinal);
 			}
 
 			printf(" (resolved to address %p)\n", addr);
@@ -648,22 +746,219 @@ void resolve_imports(LOADED_PE_IMAGE* image, i386* cpu){
 	}
 }
 
-int main(int argc, char* argv[])
-{
-	i386 CPU;
-	cpu_init(&CPU);
-	LOADED_PE_IMAGE hello = load_pe_file("C:\\Users\\Will\\peldr\\hello.exe");
+uint32_t debug_step(i386* cpu){
+	FILE* fp;
+	BREAKPOINT* temp;
+	BREAKPOINT* temp2;
+	BREAKPOINT* temp3;
+	LOADED_IMAGE* cur;
+	LOADED_PE_IMAGE* cur_image;
+	uint32_t bp_addr;
 
-	parse_headers(&hello, &CPU);
+	char option[10];
+	char reg[25];
+	uint32_t value, value_2;
+	char buf[100];
 
-	while (CPU.running){
-		cpu_step(&CPU);
+	if (cpu->single_step){
+		value = 0;
+		value_2 = 0;
+
+		printf("(%p) ", cpu->eip);
+		gets(buf);
+		sscanf(buf, "%s %x %x", option, &value, &value_2);
+
+		if (strcmp(option, "dr") == 0){ //dump registers
+			cpu_dump(cpu);
+		}
+		else if (strcmp(option, "dm") == 0){ //dump memory
+			for (int p = 0; p < value_2; p++){
+				printf("%p: ", value);
+
+				for (int i = value; i < value + 16; i++){
+					printf("%02x ", *virtual_to_physical_addr(cpu, i));
+				}
+				printf(" | ");
+				for (int i = value; i < value + 16; i++){
+					printf("%c", *virtual_to_physical_addr(cpu, i));
+				}
+				printf("\n");
+				value += 16;
+			}
+		}
+		else if (strcmp(option, "dfm") == 0){
+			sscanf(buf, "%s %x %x %s", option, &value, &value_2, reg);
+			fp = fopen(reg, "wb");
+			value_2 = fwrite(virtual_to_physical_addr(cpu, value), 1, value_2, fp);
+			fclose(fp);
+			printf("Wrote %d bytes to %s\n", value_2, reg);
+		}
+		else if (strcmp(option, "pr") == 0){ //poke register (i.e. pr ah 0x0)
+			sscanf(buf, "%s %s %x", option, reg, &value);
+			set_reg(cpu, reg, value);
+		}
+		else if (strcmp(option, "p8") == 0){ //poke memory 8-bit (p8 40104d 3)
+			*virtual_to_physical_addr(cpu, value) = value_2;
+		}
+		else if (strcmp(option, "p16") == 0){ //poke memory 16-bit
+			*(uint16_t*)virtual_to_physical_addr(cpu, value) = value_2;
+		}
+		else if (strcmp(option, "p32") == 0){ //poke memory 32-bit
+			*(uint32_t*)virtual_to_physical_addr(cpu, value) = value_2;
+		}
+		else if (strcmp(option, "s") == 0){
+			cpu->running = 1;
+			cpu->single_step = 1;
+		}
+		else if (strcmp(option, "r") == 0){
+			cpu->running = 1;
+			cpu->single_step = 0;
+		}
+		else if (strcmp(option, "b") == 0){ //list breakpoints
+			temp = cpu->breakpoint;
+			while (temp){
+				printf("  %p\n", temp->addr);
+				temp = temp->next;
+			}
+		}
+		else if (strcmp(option, "bs") == 0){ //set breakpoint
+			temp = cpu->breakpoint;
+			cpu->breakpoint = (BREAKPOINT*)malloc(sizeof(BREAKPOINT));
+			cpu->breakpoint->addr = value;
+			cpu->breakpoint->value = *virtual_to_physical_addr(cpu, value);
+			cpu->breakpoint->next = temp;
+			printf("Breakpoint set at %p\n", value);
+			*virtual_to_physical_addr(cpu, value) = 0xCC;
+		}
+		else if (strcmp(option, "br") == 0){ //remove breakpoint
+			printf("Removed breakpoint at %p (but not really)\n", value);
+		}
+		else if (strcmp(option, "g") == 0){ //goto
+			cpu->eip = value;
+		}
+		else if (strcmp(option, "e") == 0){ //exit
+			
+		}
+		else if (strcmp(option, "d") == 0){
+			printf("Not yet implemented!\n");
+		}
+		else if (strcmp(option, "ex") == 0){
+			sscanf(buf, "%s %s", option, reg);
+			cur_image = find_image(reg);
+
+			if (cur_image == 0){
+				printf("No image %s present in memory.\n", reg);
+			}
+			else{
+				print_export_table(cur_image, cpu);
+			}
+		}
+		else if (strcmp(option, "li") == 0){
+			cur = loaded_images;
+
+			while (cur){
+				printf("%s\n", cur->name);
+				cur = cur->next;
+			}
+		}
+		else if (strcmp(option, "st") == 0){
+			cpu_trace(cpu);
+		}
+		else if (strcmp(option, "help") == 0){
+			printf("sim80386 machine language monitor / debugger by Will Klees\n");
+			printf("COMMAND SET\n");
+			printf("d hex:addr hex:bytes - Disassembles bytes bytes from addr\n");
+			printf("dr - Dump registers\n");
+			printf("dm hex:addr hex:pages - Dumps 16-byte memory pages in hex and ascii starting from addr\n");
+			printf("dfm hex:addr hex:bytes str:file - Dumps the specified number of bytes starting at addr to the file\n");
+			printf("pr str:reg hex:val - Puts val into the desired register specified in reg\n");
+			printf("p8 hex:addr hex:val - Puts the byte specified in val into addr\n");
+			printf("p16 hex:addr hex:val - Puts the word specified in val into addr\n");
+			printf("p32 hex:addr hex:val - Puts the dword specified in val into addr\n");
+			printf("s - Single steps execution\n");
+			printf("r - Begins normal execution\n");
+			printf("b - Lists breakpoints\n");
+			printf("bs hex:addr - Sets breakpoint at addr\n");
+			printf("br hex:addr - Removes breakpoint set at addr\n");
+			printf("g hex:addr - Sets EIP to addr\n");
+			printf("ex str:name - Prints out all of the exports of a given PE image\n");
+			printf("li - Lists images loaded into memory\n");
+			printf("st - Stack trace (only works if the program sets up stack frames via EBP)\n");
+			printf("e - Exits\n");
+		}
+		else{
+			printf("Unknown command %s. Press help for more options.\n", option);
+		}
 	}
 
-	cpu_dump(&CPU);
+	if (cpu->breakpoint_hit){ //fixup the breakpoint
+		cpu->fixing_breakpoint = 1;
 
-	getchar();
+		//find the relevant breakpoint
+		temp = cpu->breakpoint;
+
+		while (temp){
+			if (temp->addr == cpu->eip){
+				break;
+			}
+			temp = temp->next;
+		}
+
+		*virtual_to_physical_addr(cpu, cpu->eip) = temp->value;
+	}
+
+	if (cpu->running){
+		cpu_step(cpu);
+	}
+
+	if (cpu->fixing_breakpoint){ //return 0xCC to the breakpoint
+		*virtual_to_physical_addr(cpu, temp->addr) = 0xCC;
+		cpu->fixing_breakpoint = 0;
+	}
+
+	if (cpu->running == 0){
+		if (cpu->escaping){
+			cpu->escaping = 0;
+			cpu->running = 1;
+			return 1;
+		}
+
+		cpu->single_step = 1;
+	}
+
+	if (cpu->single_step){
+		cpu->running = 0;
+	}
 
 	return 0;
 }
 
+uint8_t escape_routine[3] = {0xcd, 0xff, 0xc3};
+
+int main(int argc, char* argv[])
+{
+	FILE* fp;
+
+	int single_step = 1;
+	char option[10];
+	char reg[25];
+	uint32_t value, value_2;
+
+	char buf[100];
+
+	i386 CPU;
+	cpu_init(&CPU);
+	LOADED_PE_IMAGE hello = load_pe_file("C:\\Users\\Will\\peldr\\hello.exe");
+	parse_headers(&hello, &CPU);
+	CPU.running = 0;
+	CPU.single_step = 1;
+
+	//map the escape routine into RAM somewhere
+	escape_addr = 0xFFFF0000;
+	global_cpu = &CPU;
+	virtual_mmap(&CPU, escape_addr, escape_routine);
+
+	while (1){
+		debug_step(&CPU);
+	}
+}
