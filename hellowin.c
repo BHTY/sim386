@@ -7,6 +7,8 @@
 
 long FAR PASCAL WndProc (HWND, WORD, WORD, LONG) ;
 
+char *hello_text = "Hello, Windows!";
+
 int PASCAL WinMain (HANDLE hInstance, HANDLE hPrevInstance,
                     LPSTR lpszCmdParam, int nCmdShow)
      {
@@ -65,7 +67,7 @@ long FAR PASCAL WndProc (HWND hwnd, WORD message, WORD wParam, LONG lParam)
 
                GetClientRect (hwnd, &rect) ;
 
-               DrawText (hdc, "Hello, Windows!", -1, &rect,
+               DrawText (hdc, hello_text, -1, &rect,
                          DT_SINGLELINE | DT_CENTER | DT_VCENTER) ;
 
                EndPaint (hwnd, &ps) ;
@@ -76,7 +78,7 @@ long FAR PASCAL WndProc (HWND hwnd, WORD message, WORD wParam, LONG lParam)
                return 0 ;
 	       break;
 	  case WM_KEYDOWN:
-	       MessageBoxA(hwnd, "Key pushed!", "Key pushed!", MB_OK);
+	       MessageBoxA(hwnd, "Key pushed!", hello_text, MB_OK);
           }
 
      return DefWindowProc (hwnd, message, wParam, lParam) ;

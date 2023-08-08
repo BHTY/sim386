@@ -813,14 +813,19 @@ uint32_t debug_step(i386* cpu){
 	char reg[25];
 	uint32_t value, value_2;
 	char buf[100];
+	option[0] = 'r';
+	option[1] = 0;
 
 	if (cpu->single_step){
 		value = 0;
 		value_2 = 0;
 
 		printf("(%p) ", cpu->eip);
+
+#ifndef HEADLESS
 		gets(buf);
 		sscanf(buf, "%s %x %x", option, &value, &value_2);
+#endif
 
 		if (strlen(buf) == 0) return 0;
 
@@ -1011,7 +1016,8 @@ int main(int argc, char* argv[])
 
 	i386 CPU;
 	cpu_init(&CPU);
-	LOADED_PE_IMAGE hello = load_pe_file("C:\\Users\\Will\\peldr\\hellowin.exe");
+	//LOADED_PE_IMAGE hello = load_pe_file("C:\\Users\\Will\\peldr\\hellowin.exe");
+	LOADED_PE_IMAGE hello = load_pe_file(argv[1]);
 	parse_headers(&hello, &CPU);
 	CPU.running = 0;
 	CPU.single_step = 1;

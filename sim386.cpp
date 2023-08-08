@@ -1,7 +1,7 @@
-#include "sim386.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "sim386.h"
 
 const char* reg_names_8[8] = {"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BH"};
 const char* reg_names_16[8] = {"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI"};

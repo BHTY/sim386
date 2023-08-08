@@ -2,6 +2,10 @@
 
 #include <stdint.h>
 
+#ifdef HEADLESS
+#define printf(...)
+#endif
+
 #define STACK_BASE 0x4000000
 
 #define GET_PDE(addr) (addr >> 22)
