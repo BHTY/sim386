@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+#define HEADLESS
+
 #ifdef HEADLESS
 #define printf(...)
 #endif

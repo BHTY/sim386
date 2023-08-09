@@ -374,7 +374,7 @@ uint32_t thunk_EndPaint(i386* cpu){
 uint32_t thunk_DrawTextA(i386* cpu){
 	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	uint32_t lpchText = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
-	uint32_t cchText = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t cchText = (int32_t)(int8_t)*(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
 	uint32_t lprc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
 	uint32_t format = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
 	LPCSTR _lpchText = (LPCSTR)virtual_to_physical_addr(cpu, lpchText);
@@ -952,7 +952,7 @@ uint32_t debug_step(i386* cpu){
 			cpu->eip = value;
 		}
 		else if (strcmp(option, "e") == 0){ //exit
-			
+			exit(0);
 		}
 		else if (strcmp(option, "d") == 0){
 			printf("Not yet implemented!\n");
