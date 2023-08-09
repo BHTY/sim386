@@ -399,9 +399,61 @@ uint32_t thunk_BeginPaint(i386* cpu){
 	return (uint32_t)BeginPaint((HWND)hWnd, (LPPAINTSTRUCT)_lpPaint);
 }
 
+uint32_t thunk_GetSystemMetrics(i386* cpu){
+	uint32_t nIndex = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling GetSystemMetrics(%p)", nIndex);
+	return (uint32_t)GetSystemMetrics((int)nIndex);
+}
+
+uint32_t thunk_TranslateAcceleratorA(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t hAccTable = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t lpMsg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	LPMSG _lpMsg = (LPMSG)virtual_to_physical_addr(cpu, lpMsg);
+	printf("\nCalling TranslateAcceleratorA(%p, %p, %p)", hWnd, hAccTable, lpMsg);
+	return (uint32_t)TranslateAcceleratorA((HWND)hWnd, (HACCEL)hAccTable, (LPMSG)_lpMsg);
+}
+
+uint32_t thunk_GetDC(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling GetDC(%p)", hWnd);
+	return (uint32_t)GetDC((HWND)hWnd);
+}
+
+uint32_t thunk_ReleaseDC(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t hDC = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	printf("\nCalling ReleaseDC(%p, %p)", hWnd, hDC);
+	return (uint32_t)ReleaseDC((HWND)hWnd, (HDC)hDC);
+}
+
+uint32_t thunk_SetPixel(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t x = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t y = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t color = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	printf("\nCalling SetPixel(%p, %p, %p, %p)", hdc, x, y, color);
+	return (uint32_t)SetPixel((HDC)hdc, (int)x, (int)y, (COLORREF)color);
+}
+
+uint32_t thunk_InvalidateRect(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpRect = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t bErase = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	CONST RECT * _lpRect = 0;
+	
+	if (lpRect){
+		_lpRect = (CONST RECT *)virtual_to_physical_addr(cpu, lpRect);
+	}
+
+	printf("\nCalling InvalidateRect(%p, %p, %p)", hWnd, lpRect, bErase);
+	return (uint32_t)InvalidateRect((HWND)hWnd, (CONST RECT *)_lpRect, (BOOL)bErase);
+}
+
 uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA,
 									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA,
-									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint};
+									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint,
+									   thunk_GetSystemMetrics, thunk_TranslateAcceleratorA, thunk_GetDC, thunk_ReleaseDC, thunk_SetPixel, thunk_InvalidateRect};
 
 void handle_syscall(i386* cpu){
 	int function_id = cpu->eax;
@@ -692,6 +744,8 @@ void parse_section_headers(LOADED_PE_IMAGE* image, i386* cpu){
 			parse_idt(image, &current_section, cpu);
 		} else if (strcmp((const char*)current_section.Name, ".reloc") == 0){
 			parse_rt(image, &current_section, cpu);
+		} else if (strcmp((const char*)current_section.Name, ".data") == 0){
+			map_section(cpu, current_section.VirtualAddress + image->image_base, image->data + current_section.PointerToRawData, 8192);
 		}
 
 		map_section(cpu, current_section.VirtualAddress + image->image_base, image->data + current_section.PointerToRawData, current_section.SizeOfRawData);

@@ -25,9 +25,50 @@ void cpu_set_zf(i386* cpu, uint32_t value){
 	}
 }
 
+void cpu_set_sf(i386* cpu, uint32_t value){
+	if (value & 0x80000000){
+		cpu_set_flag(cpu, 7);
+	}
+	else{
+		cpu_clear_flag(cpu, 7);
+	}
+}
+
+void cpu_set_cf(i386* cpu, uint32_t value){
+	if (value){
+		cpu_set_flag(cpu, 0);
+	}
+	else{
+		cpu_clear_flag(cpu, 0);
+	}
+}
+
+void alu_idiv32(i386* cpu, int32_t divisor){ //also has to set flags
+	int64_t dividend = (cpu->edx << 32) | cpu->eax;
+	int64_t result = dividend / divisor;
+	int64_t rem = dividend % divisor;
+
+	cpu->eax = result;
+	cpu->edx = rem;
+}
+
+uint32_t alu_shl32(i386* cpu, uint32_t a, uint8_t shamt){ //also has to set flags
+	uint32_t result = a << shamt;
+
+	return result;
+}
+
+int32_t alu_sar32(i386* cpu, int32_t a, uint8_t shamt){ //also has to set flags
+	int32_t result = a >> shamt;
+
+	return result;
+}
+
 uint32_t alu_sub32(i386* cpu, uint32_t a, uint32_t b){ //also has to set flags
 	uint32_t result = a - b;
 	cpu_set_zf(cpu, result);
+	cpu_set_sf(cpu, result);
+	cpu_set_cf(cpu, result > a);
 	return result;
 }
 
@@ -131,8 +172,9 @@ void cpu_cmp32(i386* cpu, uint32_t* dst_ptr, uint32_t* src_ptr){
 }
 
 void cpu_inc32(i386* cpu, uint32_t* dst_ptr){
-	printf("32-bit increment is unimplemented!");
-	cpu->running = 0;
+	(*dst_ptr)++;
+	cpu_set_zf(cpu, *dst_ptr);
+	cpu_set_sf(cpu, *dst_ptr);
 }
 
 void cpu_dec32(i386* cpu, uint32_t* dst_ptr){
@@ -150,11 +192,29 @@ void cpu_dec16(i386* cpu, uint16_t* dst_ptr){
 	cpu->running = 0;
 }
 
+void cpu_shl32(i386* cpu, uint32_t* dst_ptr, uint8_t shamt){
+	*dst_ptr = alu_shl32(cpu, *dst_ptr, shamt);
+}
+
+void cpu_shr32(i386* cpu, uint32_t* dst_ptr, uint8_t shamt){
+	printf("32-bit SHR is unimplemented!");
+	cpu->running = 0;
+}
+
+void cpu_sar32(i386* cpu, uint32_t* dst_ptr, uint8_t shamt){
+	*dst_ptr = alu_sar32(cpu, *dst_ptr, shamt);
+}
+
 const char* arith_family_names[8] = {"ADD", "OR", "ADC", "SBB", "AND", "SUB", "XOR", "CMP"};
 void(*arith_family_fns_16[8])(i386*, uint16_t*, uint16_t*) = {cpu_add16, cpu_or16, cpu_adc16, cpu_sbb16, cpu_and16, cpu_sub16, cpu_xor16, cpu_cmp16};
 void(*arith_family_fns_32[8])(i386*, uint32_t*, uint32_t*) = {cpu_add32, cpu_or32, cpu_adc32, cpu_sbb32, cpu_and32, cpu_sub32, cpu_xor32, cpu_cmp32};
 
 const char* mul_family_names[8] = {"TEST", NULL, "NOT", "NEG", "MUL", "IMUL", "DIV", "IDIV"};
+
+const char* shift_family_names[8] = { "ROL", "ROR", "RCL", "RCR", "SHL", "SHR", "???", "SAR" };
+void(*shift_family_fns_8[8])(i386*, uint8_t*, uint8_t) = {0, 0, 0, 0, 0, 0, 0, 0};
+void(*shift_family_fns_16[8])(i386*, uint16_t*, uint8_t) = {0, 0, 0, 0, 0, 0, 0, 0};
+void(*shift_family_fns_32[8])(i386*, uint32_t*, uint8_t) = {0, 0, 0, 0, cpu_shl32, cpu_shr32, 0, cpu_sar32};
 
 void cpu_push16(i386* cpu, uint16_t *val){
 	cpu->esp -= 2;
@@ -518,6 +578,11 @@ void op_74(i386* cpu){ //JE rel8
 	cjmp(cpu->eflags & 0x40);
 }
 
+void op_75(i386* cpu){ //JNE rel8
+	printf("JNE ");
+	cjmp(!(cpu->eflags & 0x40));
+}
+
 void op_81(i386* cpu){ //op r/m16, imm16/32
 	get_modrm();
 	printf("%s ", arith_family_names[REG(modrm)]);
@@ -593,6 +658,25 @@ void op_8D(i386* cpu){ //LEA r32, m
 	*dst_ptr = addr;
 }
 
+void op_99(i386* cpu){ //CWD/CDQ
+	switch (cpu->operand_size){
+		case 0:
+			printf("CWD");
+			if (cpu->ax & 0x8000){
+				cpu->dx = 0xFFFF;
+			}
+			break;
+		case 1:
+			printf("CDQ");
+			if (cpu->eax & 0x80000000){
+				cpu->edx = 0xFFFFFFFF;
+			}
+			break;
+	}
+
+	cpu->eip++;
+}
+
 void op_A1(i386* cpu){
 	cpu->eip++;
 	uint32_t addr = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->eip);
@@ -624,6 +708,45 @@ void op_B8(i386* cpu){ //MOV EAX, imm32
 			printf("EAX, %08x", imm);
 			cpu->eax = imm;
 			cpu->eip += 4;
+			break;
+	}
+}
+
+void op_B9(i386* cpu){ //MOV ECX, imm32
+	printf("MOV ");
+	cpu->eip++;
+	uint32_t imm = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->eip);
+
+	switch (cpu->operand_size){
+	case 0: //16-bit
+		printf("CX, %04x", imm);
+		cpu->cx = imm;
+		cpu->eip += 2;
+		break;
+	case 1: //32-bit
+		printf("ECX, %08x", imm);
+		cpu->ecx = imm;
+		cpu->eip += 4;
+		break;
+	}
+}
+
+
+void op_C1(i386* cpu){ //shift r/m16/32, imm8
+	get_modrm();
+	printf("%s ", shift_family_names[REG(modrm)]);
+	cpu->eip+=2;
+	get_modrm_dst_ptr(0);
+	uint8_t imm = *virtual_to_physical_addr(cpu, cpu->eip);
+	cpu->eip++;
+	printf(", %02x", imm);
+
+	switch (cpu->operand_size){
+	case 0:
+			shift_family_fns_16[REG(modrm)](cpu, (uint16_t*)dst_ptr, imm);
+			break;
+		case 1:
+			shift_family_fns_32[REG(modrm)](cpu, dst_ptr, imm);
 			break;
 	}
 }
@@ -772,6 +895,9 @@ void op_F7(i386* cpu){
 			alu_and32(cpu, *dst_ptr, imm_val);
 			cpu->eip += 4;
 			break;
+		case 7:
+			alu_idiv32(cpu, *dst_ptr);
+			break;
 		default:
 			printf("%d", REG(modrm));
 			cpu->running = 0;
@@ -804,6 +930,22 @@ void extended_op_85(i386* cpu){
 	printf("JNE ");
 	cjmpex(!(cpu->eflags & 0x40));
 }
+
+void extended_op_8D(i386* cpu){
+	printf("JGE ");
+	cjmpex(((cpu->eflags & 0x80) >> 7) == ((cpu->eflags & 0x800) >> 11));
+}
+
+void extended_op_8E(i386* cpu){
+	printf("JLE ");
+	cjmpex((cpu->eflags & 0x40) || (((cpu->eflags & 0x80) >> 7) != ((cpu->eflags & 0x800) >> 11)));
+}
+
+void extended_op_8F(i386* cpu){
+	printf("JG ");
+	cjmpex(!(cpu->eflags & 0x40) && (((cpu->eflags & 0x80) >> 7) == ((cpu->eflags & 0x800) >> 11)));
+}
+
 
 void(*extended_op_table[256])(i386* cpu) = {
 	0, //0x0
@@ -947,9 +1089,9 @@ void(*extended_op_table[256])(i386* cpu) = {
 	0, //0x8a
 	0, //0x8b
 	0, //0x8c
-	0, //0x8d
-	0, //0x8e
-	0, //0x8f
+	extended_op_8D, //0x8d
+	extended_op_8E, //0x8e
+	extended_op_8F, //0x8f
 	0, //0x90
 	0, //0x91
 	0, //0x92
@@ -1182,7 +1324,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x72
 	0, //0x73
 	op_74, //0x74
-	0, //0x75
+	op_75, //0x75
 	0, //0x76
 	0, //0x77
 	0, //0x78
@@ -1218,7 +1360,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x96
 	0, //0x97
 	0, //0x98
-	0, //0x99
+	op_99, //0x99
 	0, //0x9a
 	0, //0x9b
 	0, //0x9c
@@ -1250,7 +1392,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0xb6
 	0, //0xb7
 	op_B8, //0xb8
-	0, //0xb9
+	op_B9, //0xb9
 	0, //0xba
 	0, //0xbb
 	0, //0xbc
@@ -1258,7 +1400,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0xbe
 	0, //0xbf
 	0, //0xc0
-	0, //0xc1
+	op_C1, //0xc1
 	op_C2, //0xc2
 	op_C3, //0xc3
 	0, //0xc4

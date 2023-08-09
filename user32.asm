@@ -169,6 +169,51 @@ BeginPaint:
 	int SYSCALL_THUNK
 	ret 0x08
 
+global GetSystemMetrics
+extern GetSystemMetrics
+export GetSystemMetrics
+
+GetSystemMetrics:
+	mov eax, THUNK_USER32_GETSYSTEMMETRICS
+	int SYSCALL_THUNK
+	ret 0x04
+
+global TranslateAcceleratorA
+extern TranslateAcceleratorA
+export TranslateAcceleratorA
+
+TranslateAcceleratorA:
+	mov eax, THUNK_USER32_GETSYSTEMMETRICS
+	int SYSCALL_THUNK
+	ret 0x0C
+
+global GetDC
+extern GetDC
+export GetDC
+
+GetDC:
+	mov eax, THUNK_USER32_GETDC
+	int SYSCALL_THUNK
+	ret 0x04
+
+global ReleaseDC
+extern ReleaseDC
+export ReleaseDC
+
+ReleaseDC:
+	mov eax, THUNK_USER32_RELEASEDC
+	int SYSCALL_THUNK
+	ret 0x08
+	
+global InvalidateRect
+extern InvalidateRect
+export InvalidateRect
+
+InvalidateRect:
+	mov eax, THUNK_USER32_INVALIDATERECT
+	int SYSCALL_THUNK
+	ret 0x0C
+
 
 THUNK_USER32_MESSAGEBOXA equ 0x00
 THUNK_USER32_LOADCURSORA equ 0x04
@@ -188,4 +233,9 @@ THUNK_USER32_ENDPAINT equ 0x14
 THUNK_USER32_DRAWTEXTA equ 0x15
 THUNK_USER32_GETCLIENTRECT equ 0x16
 THUNK_USER32_BEGINPAINT equ 0x17
+THUNK_USER32_GETSYSTEMMETRICS equ 0x18
+THUNK_USER32_TRANSLATEACCELERATORA equ 0x19
+THUNK_USER32_GETDC equ 0x1A
+THUNK_USER32_RELEASEDC equ 0x1B
+THUNK_USER32_INVALIDATERECT equ 0x1D
 SYSCALL_THUNK equ 0x80
