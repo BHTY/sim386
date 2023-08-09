@@ -2,8 +2,6 @@
 
 #include <stdint.h>
 
-#define HEADLESS
-
 #ifdef HEADLESS
 #define printf(...)
 #endif
@@ -16,6 +14,10 @@
 #define MOD(modrm) ((modrm & 0xc0) >> 6)
 #define REG(modrm) ((modrm & 0x38) >> 3)
 #define RM(modrm) (modrm & 0x7)
+
+#define SCALE(SIB)	(SIB >> 6)
+#define INDEX(SIB)	((SIB & 0x38) >> 3)
+#define BASE(SIB)	(SIB & 0x7)
 
 #define cjmp(cond)					uint32_t jump_target = cpu->eip + 2 + (int32_t)(int8_t)*virtual_to_physical_addr(cpu, cpu->eip + 1);\
 									printf("%p", jump_target); \
@@ -43,8 +45,10 @@
 									}
 
 #define print_modrm()				printf("Mod=%d Reg=%d Rm=%d\n", MOD(modrm), REG(modrm), RM(modrm));
+#define print_sib()					printf("Scale=%d Index=%d Base=%d\n", SCALE(sib), INDEX(sib), BASE(sib));
 
 #define get_modrm_src_reg_1632()	uint32_t* src_ptr = get_reg_1632(cpu, REG(modrm));
+#define get_modrm_src_reg_8()		uint8_t* src_ptr = get_reg_8(cpu, REG(modrm));
 
 #define finish_op(op16, op32)		switch(cpu->operand_size){ \
 										case 0: \
@@ -72,6 +76,18 @@
 											break; \
 										default: \
 											dst_ptr = (uint32_t*)virtual_to_physical_addr(cpu, calc_modrm_addr(cpu, modrm)); \
+											break; \
+									} \
+									if (c){ printf(", "); }
+
+#define get_modrm_dst_ptr_8(c)		uint8_t* dst_ptr; \
+									switch (MOD(modrm)){ \
+										case 3: \
+											dst_ptr = get_reg_8(cpu, RM(modrm)); \
+											printf("%s", reg_names_8[RM(modrm)]); \
+											break; \
+										default: \
+											dst_ptr = (uint8_t*)virtual_to_physical_addr(cpu, calc_modrm_addr(cpu, modrm)); \
 											break; \
 									} \
 									if (c){ printf(", "); }
