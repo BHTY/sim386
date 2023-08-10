@@ -12,3 +12,4 @@ win32emu To-do List
   - Similarly, for functions that have to pass arguments back to the CPU for reverse thunking (i.e. dummy_WndProc), they should use a generic function as well
     - A varargs function (with a fixed parameter indicating the number of arguments) is probably the best bet here (on the MIPS and most other RISC architectures, it'll put the first four arguments in designated registers and then push the rest onto the stack after a 16-byte home space)
 - Add a MIPS R4000 CPU core to swap with the i386 core
+Good news on the portability front: In pe_ldr.c, aside from the thunks themselves, the only functions that make any major assumptions about the CPU being an 80386 are ``a``
