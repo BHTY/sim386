@@ -5,19 +5,31 @@ def tokenize(string):
     tokens = re.findall("[__#a-zA-Z][__#a-zA-Z0-9]*|->|\".*\"|==|@|!=|>=|<=|&&|\\|\\||_?\\d+|[+\-*/=!<>()[\\]{},.;:$&\\|]|'.*'|\".*\"", string)
     return tokens
 
-tokens_to_ignore = ["WINUSERAPI", "WINGDIAPI", "WINAPI", "_Out_", "_In_", "_In_opt_", "("]
+#use _opt_ to determine whether to do a null check
+tokens_to_ignore = ["DECLSPEC_ALLOCATOR", "WINBASEAPI", "WINUSERAPI", "WINGDIAPI", "WINAPI", "_Out_", "_In_", "("]
+optional_tokens = ["_Out_opt_", "_In_opt_", "_Inout_opt_"]
 
-function_decl = """WINUSERAPI
-VOID
+function_decl = """BOOL
 WINAPI
-PostQuitMessage(
-    _In_ int nExitCode);"""
+HeapFree(
+    HANDLE hHeap,
+    _In_ DWORD dwFlags,
+    LPVOID lpMem
+    );"""
+
+__MODULE__ = "KERNEL32"
+
+def generate_asm(name, args):
+    out_string = "global {}\nextern {}\nexport {}\n".format(name, name, name)
+    out_string += "\n{}:\n\tmov eax, THUNK_{}_{}\n\tint SYSCALL_THUNK\n\tret {}".format(name, __MODULE__, name.upper(), hex(len(args) * 4))
+    return out_string
 
 class Argument:
-    def __init__(self, tokens):
+    def __init__(self, tokens, optional):
         self.name = tokens[-1]
         self.value_type = " ".join(tokens[:-1])
         self.is_pointer = (tokens[0][0:2] == "LP") or "*" in tokens
+        self.optional = optional
 
 
 def generate_fn_call(name, args):
@@ -50,11 +62,16 @@ def generate_print_string(name, args):
 def parse(toks):
     return_value = None
     function_name = None
+    current_optional = False
     args = []
     current_arg = []
     
     for i in toks:
         if i in tokens_to_ignore:
+            continue
+
+        if i in optional_tokens:
+            current_optional = True
             continue
         
         if return_value == None: #looking for return value
@@ -67,11 +84,12 @@ def parse(toks):
             continue
 
         elif i == ",":
-            args.append(Argument(current_arg))
+            args.append(Argument(current_arg, current_optional))
             current_arg = []
+            current_optional = False
 
         elif i == ")": #we're done here
-            args.append(Argument(current_arg))
+            if len(current_arg) > 1: args.append(Argument(current_arg, current_optional))
             break
 
         else:
@@ -87,7 +105,11 @@ def parse(toks):
 
     for i in args:
         if i.is_pointer:
-            function_text += "\t{} {} = ({})virtual_to_physical_addr(cpu, {});\n".format(i.value_type, "_" + i.name, i.value_type, i.name)
+            if i.optional:
+                function_text += "\t{} {} = 0;\n".format(i.value_type, "_" + i.name)
+                function_text += "\tif({}){{\n\t\t{} = ({})virtual_to_physical_addr(cpu, {});\n\t}}\n".format(i.name, "_" + i.name, i.value_type, i.name)
+            else:
+                function_text += "\t{} {} = ({})virtual_to_physical_addr(cpu, {});\n".format(i.value_type, "_" + i.name, i.value_type, i.name)
 
     function_text += "\tprintf({});\n".format(generate_print_string(function_name, args))
 
@@ -98,6 +120,6 @@ def parse(toks):
 
     function_text += "\n}"
 
-    return function_text
+    return function_text + "\n" + generate_asm(function_name, args)
         
 print(parse(tokenize(function_decl)))
