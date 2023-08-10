@@ -27,7 +27,8 @@ Good news on the portability front: In pe_ldr.c, aside from the thunks themselve
 Core System DLLs (still very barebones)
 - GDI32: 
 - KERNEL32: 
-- USER32: 
+- USER32:
+
 Less Core System DLLs
 - SHELL32.DLL: Thunk for GetVersionA but that's it
 - MSVFW32.DLL - Video for Windows: Unimplemented
