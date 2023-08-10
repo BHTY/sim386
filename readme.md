@@ -3,6 +3,7 @@ win32emu To-do List
 - Get FreeCell working (then WinMine, then Doom)
 - Fix the heap manager
 - ``VirtualAlloc``
+- Shim menu name stuff in RegisterClass by creating a menu and inserting the items by parsing the resource directory when CreateWindow is called
 - Read resource data directory & implement (rather than stub out) associated functions
   - ``LoadBitmapA``, ``LoadStringA``, ``LoadAcceleratorsA``, ``LoadCursorA``
   - The trouble with these is that they get passed an ``HINSTANCE``. To make these work right, I'll need to fix my entire approach to ``HINSTANCE``s
