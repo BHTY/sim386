@@ -6,6 +6,8 @@
 #define printf(...)
 #endif
 
+#define ALIGN(x, val)	(((x % val) == 0) ? val : (x + val) - x % val)
+
 #define STACK_BASE 0x4000000
 
 #define GET_PDE(addr) (addr >> 22)
@@ -191,6 +193,7 @@ typedef struct{
 
 	int running;
 	int operand_size; //0 for 16-bit, 1 for 32-bit
+	int print_addr;
 
 	i386_PD page_dir;
 	BREAKPOINT* breakpoint;
@@ -199,6 +202,12 @@ typedef struct{
 	int fixing_breakpoint;
 	int escaping;
 } i386; //address size?
+
+typedef struct RESERVED_BLOCK{
+	uint32_t address;
+	uint32_t pages;
+	struct RESERVED_BLOCK* next;
+} RESERVED_BLOCK;
 
 void map_section(i386* cpu, uint32_t vaddr, uint8_t* paddr, uint32_t size);
 uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr);
@@ -211,5 +220,9 @@ void set_reg(i386*, char*, uint32_t);
 void cpu_trace(i386*);
 uint32_t cpu_reversethunk(i386* cpu, uint32_t target_addr, uint32_t escape_addr);
 void cpu_push32(i386* cpu, uint32_t *val);
+
+void list_blocks();
+void reserve_address_space(i386* cpu, uint32_t offset, uint32_t num_pages);
+uint32_t scan_free_address_space(i386* cpu, uint32_t num_pages, uint32_t increment);
 
 extern void(*extended_op_table[256])(i386* cpu);

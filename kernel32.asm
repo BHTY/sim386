@@ -41,10 +41,148 @@ GetCommandLineA:
 GetStartupInfoA:
 	mov eax, THUNK_KERNEL32_GETSTARTUPINFOA
 	int SYSCALL_THUNK
+	ret 0x4
+
+global HeapAlloc
+extern HeapAlloc
+export HeapAlloc
+
+HeapAlloc:
+	mov eax, THUNK_KERNEL32_HEAPALLOC
+	int SYSCALL_THUNK
+	ret 0xc
+
+global GetVersion
+extern GetVersion
+export GetVersion
+
+GetVersion:
+	mov eax, 0x23f00206
 	ret
+
+global HeapCreate
+extern HeapCreate
+export HeapCreate
+
+HeapCreate:
+	mov eax, THUNK_KERNEL32_HEAPCREATE
+	int SYSCALL_THUNK
+	ret 0xc
+
+global GetStdHandle
+extern GetStdHandle
+export GetStdHandle
+
+GetStdHandle:
+	mov eax, THUNK_KERNEL32_GETSTDHANDLE
+	int SYSCALL_THUNK
+	ret 0x4
+	
+global GetFileType
+extern GetFileType
+export GetFileType
+
+GetFileType:
+	mov eax, THUNK_KERNEL32_GETFILETYPE
+	int SYSCALL_THUNK
+	ret 0x4
+
+global SetHandleCount
+extern SetHandleCount
+export SetHandleCount
+
+SetHandleCount:
+	mov eax, THUNK_KERNEL32_SETHANDLECOUNT
+	int SYSCALL_THUNK
+	ret 0x4
+	
+global GetACP
+extern GetACP
+export GetACP
+
+GetACP:
+	mov eax, THUNK_KERNEL32_GETACP
+	int SYSCALL_THUNK
+	ret 0x0
+
+global GetCPInfo
+extern GetCPInfo
+export GetCPInfo
+
+GetCPInfo:
+	mov eax, THUNK_KERNEL32_GETCPINFO
+	int SYSCALL_THUNK
+	ret 0x8
+
+global GetEnvironmentStringsW
+extern GetEnvironmentStringsW
+export GetEnvironmentStringsW
+
+GetEnvironmentStringsW:
+	mov eax, THUNK_KERNEL32_GETENVIRONMENTSTRINGSW
+	int SYSCALL_THUNK
+	ret 0x0
+	
+global FreeEnvironmentStringsW
+extern FreeEnvironmentStringsW
+export FreeEnvironmentStringsW
+
+FreeEnvironmentStringsW:
+	mov eax, THUNK_KERNEL32_FREEENVIRONMENTSTRINGSW
+	int SYSCALL_THUNK
+	ret 0x4
+	
+global WideCharToMultiByte
+extern WideCharToMultiByte
+export WideCharToMultiByte
+
+WideCharToMultiByte:
+	mov eax, THUNK_KERNEL32_WIDECHARTOMULTIBYTE
+	int SYSCALL_THUNK
+	ret 0x20
+	
+global GetModuleFileNameA
+extern GetModuleFileNameA
+export GetModuleFileNameA
+
+GetModuleFileNameA:
+	mov eax, THUNK_KERNEL32_GETMODULEFILENAMEA
+	int SYSCALL_THUNK
+	ret 0xc
+
+global WriteFile
+extern WriteFile
+export WriteFile
+
+WriteFile:
+	mov eax, THUNK_KERNEL32_WRITEFILE
+	int SYSCALL_THUNK
+	ret 0x14
+
+global HeapFree
+extern HeapFree
+export HeapFree
+
+HeapFree:
+	mov eax, THUNK_KERNEL32_HEAPFREE
+	int SYSCALL_THUNK
+	ret 0xc
 
 THUNK_KERNEL32_EXITPROCESS equ 0x01
 THUNK_KERNEL32_GETMODULEHANDLEA equ 0x03
 THUNK_KERNEL32_GETCOMMANDLINEA equ 0x0E
 THUNK_KERNEL32_GETSTARTUPINFOA equ 0x0F
+THUNK_KERNEL32_HEAPALLOC equ 0x1E
+THUNK_KERNEL32_HEAPCREATE equ 0x1F
+THUNK_KERNEL32_GETSTDHANDLE equ 0x20
+THUNK_KERNEL32_GETFILETYPE equ 0x21
+THUNK_KERNEL32_SETHANDLECOUNT equ 0x22
+THUNK_KERNEL32_GETACP equ 0x23
+THUNK_KERNEL32_GETCPINFO equ 0x24
+THUNK_KERNEL32_GETENVIRONMENTSTRINGSW equ 0x25
+THUNK_KERNEL32_FREEENVIRONMENTSTRINGSW equ 0x26
+THUNK_KERNEL32_WIDECHARTOMULTIBYTE equ 0x27
+THUNK_KERNEL32_GETMODULEFILENAMEA equ 0x28
+THUNK_KERNEL32_WRITEFILE equ 0x29
+THUNK_KERNEL32_HEAPFREE equ 0x2A
 SYSCALL_THUNK equ 0x80

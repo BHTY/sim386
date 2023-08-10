@@ -16,12 +16,16 @@
 
 #include "headers.h"
 #include "../sim386.h"
+#include "heap.h"
 
 LOADED_IMAGE* loaded_images;
 WINDOW_CLASS* window_classes;
 
 uint32_t escape_addr;
 i386* global_cpu;
+
+uint32_t Address_EnvironmentStrings = 0;
+uint32_t Address_CommandLine = 0;
 
 uint32_t lookup_classname(char* class_name){ //returns a pointer to the WndProc
 	WINDOW_CLASS* temp = window_classes;
@@ -302,9 +306,21 @@ uint32_t thunk_DispatchMessageA(i386* cpu){
 }
 
 uint32_t thunk_GetCommandLineA(i386* cpu){
+	//map command line into memory
+	LPSTR cmdline;
+	uint32_t value;
+
 	printf("\nCalling GetCommandLineA()");
 
-	return 0;
+	if (Address_CommandLine == 0){
+		cmdline = GetCommandLineA();
+		value = scan_free_address_space(cpu, 0x1, 0x1);
+		virtual_mmap(cpu, value, (uint8_t*)cmdline);
+		reserve_address_space(cpu, value, 0x1);
+		Address_CommandLine = value;
+	}
+
+	return Address_CommandLine;
 }
 
 uint32_t thunk_GetStartupInfoA(i386* cpu){
@@ -374,7 +390,7 @@ uint32_t thunk_EndPaint(i386* cpu){
 uint32_t thunk_DrawTextA(i386* cpu){
 	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	uint32_t lpchText = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
-	uint32_t cchText = (int32_t)(int8_t)*(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t cchText = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
 	uint32_t lprc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
 	uint32_t format = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
 	LPCSTR _lpchText = (LPCSTR)virtual_to_physical_addr(cpu, lpchText);
@@ -450,10 +466,167 @@ uint32_t thunk_InvalidateRect(i386* cpu){
 	return (uint32_t)InvalidateRect((HWND)hWnd, (CONST RECT *)_lpRect, (BOOL)bErase);
 }
 
+uint32_t thunk_HeapAlloc(i386* cpu){
+	uint32_t hHeap = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t dwFlags = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t dwBytes = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	printf("\nCalling HeapAlloc(%p, %p, %p)", hHeap, dwFlags, dwBytes);
+	uint32_t pointer = heap_alloc(cpu, hHeap, dwBytes);
+
+	if (dwFlags & HEAP_ZERO_MEMORY){
+		memset(virtual_to_physical_addr(cpu, pointer), 0, dwBytes);
+	}
+
+	return pointer;
+}
+
+uint32_t thunk_HeapCreate(i386* cpu){
+	uint32_t flOptions = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t dwInitialSize = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t dwMaximumSize = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	printf("\nCalling HeapCreate(%p, %p, %p)", flOptions, dwInitialSize, dwMaximumSize);
+	uint32_t heap_handle = alloc_heap(cpu, dwInitialSize, dwMaximumSize);
+	/*while (1);
+	return (uint32_t)HeapCreate((DWORD)flOptions, (SIZE_T)dwInitialSize, (SIZE_T)dwMaximumSize);*/
+	return heap_handle;
+}
+
+uint32_t thunk_GetStdHandle(i386* cpu){
+	uint32_t nStdHandle = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling GetStdHandle(%p)", nStdHandle);
+	return (uint32_t)GetStdHandle((DWORD)nStdHandle);
+}
+
+uint32_t thunk_GetFileType(i386* cpu){
+	uint32_t hFile = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling GetFileType(%p)", hFile);
+	return (uint32_t)GetFileType((HANDLE)hFile);
+}
+
+uint32_t thunk_SetHandleCount(i386* cpu){
+	uint32_t uNumber = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling SetHandleCount(%p)", uNumber);
+	return (uint32_t)SetHandleCount((UINT)uNumber);
+}
+
+uint32_t thunk_GetACP(i386* cpu){
+	printf("\nCalling GetACP()");
+	return (uint32_t)GetACP();
+}
+
+uint32_t thunk_GetCPInfo(i386* cpu){
+	uint32_t CodePage = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpCPInfo = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	LPCPINFO _lpCPInfo = (LPCPINFO)virtual_to_physical_addr(cpu, lpCPInfo);
+	printf("\nCalling GetCPInfo(%p, %p)", CodePage, lpCPInfo);
+	return (uint32_t)GetCPInfo((UINT)CodePage, (LPCPINFO)_lpCPInfo);
+}
+
+uint32_t length_EnvironmentStringsW(LPWCH env){ //returns length in pages
+	int i = 0;
+	DWORD* ptr = (DWORD*)env;
+
+	while (*ptr){
+		ptr++;
+		i+=4;
+	}
+
+	return ALIGN(i, 4096) / 4096;
+}
+
+uint32_t thunk_GetEnvironmentStringsW(i386* cpu){
+	//map environment variables into RAM
+	LPWCH env;
+	uint32_t value;
+	uint32_t length;
+	
+	if (Address_EnvironmentStrings == 0){
+		env = GetEnvironmentStringsW();
+		length = length_EnvironmentStringsW(env);
+		value = scan_free_address_space(cpu, length, 0x1);
+		map_section(cpu, value, (uint8_t*)env, length * 0x1000);
+		reserve_address_space(cpu, value, length);
+		Address_EnvironmentStrings = value;
+	}
+	printf("\nCalling GetEnvironmentStringsW()");
+	return Address_EnvironmentStrings;
+}
+
+uint32_t thunk_FreeEnvironmentStringsW(i386* cpu){
+	uint32_t penv = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	LPWCH _penv = (LPWCH)virtual_to_physical_addr(cpu, penv);
+	printf("\nCalling FreeEnvironmentStringsW(%p)", penv);
+	return (uint32_t)FreeEnvironmentStringsW((LPWCH)_penv);
+}
+
+uint32_t thunk_WideCharToMultiByte(i386* cpu){
+	uint32_t CodePage = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t dwFlags = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t lpWideCharStr = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t cchWideChar = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t lpMultiByteStr = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	uint32_t cbMultiByte = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 24);
+	uint32_t lpDefaultChar = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 28);
+	uint32_t lpUsedDefaultChar = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 32);
+	LPCWCH _lpWideCharStr = (LPCWCH)virtual_to_physical_addr(cpu, lpWideCharStr);
+	LPSTR _lpMultiByteStr = 0;
+	if (lpMultiByteStr){
+		_lpMultiByteStr = (LPSTR)virtual_to_physical_addr(cpu, lpMultiByteStr);
+	}
+	LPCCH _lpDefaultChar = 0;
+	if (lpDefaultChar){
+		_lpDefaultChar = (LPCCH)virtual_to_physical_addr(cpu, lpDefaultChar);
+	}
+	LPBOOL _lpUsedDefaultChar = 0;
+	if (lpUsedDefaultChar){
+		_lpUsedDefaultChar = (LPBOOL)virtual_to_physical_addr(cpu, lpUsedDefaultChar);
+	}
+	printf("\nCalling WideCharToMultiByte(%p, %p, %p, %p, %p, %p, %p, %p)", CodePage, dwFlags, lpWideCharStr, cchWideChar, lpMultiByteStr, cbMultiByte, lpDefaultChar, lpUsedDefaultChar);
+	return (uint32_t)WideCharToMultiByte((UINT)CodePage, (DWORD)dwFlags, (LPCWCH)_lpWideCharStr, (int)cchWideChar, (LPSTR)_lpMultiByteStr, (int)cbMultiByte, (LPCCH)_lpDefaultChar, (LPBOOL)_lpUsedDefaultChar);
+}
+
+uint32_t thunk_GetModuleFileNameA(i386* cpu){
+	uint32_t hModule = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpFilename = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t nSize = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	LPSTR _lpFilename = (LPSTR)virtual_to_physical_addr(cpu, lpFilename);
+	printf("\nCalling GetModuleFileNameA(%p, %p, %p)", hModule, lpFilename, nSize);
+	return (uint32_t)GetModuleFileNameA((HMODULE)hModule, (LPSTR)_lpFilename, (DWORD)nSize);
+}
+
+uint32_t thunk_WriteFile(i386* cpu){
+	uint32_t hFile = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpBuffer = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t nNumberOfBytesToWrite = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lpNumberOfBytesWritten = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t lpOverlapped = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	LPCVOID _lpBuffer = (LPCVOID)virtual_to_physical_addr(cpu, lpBuffer);
+	LPDWORD _lpNumberOfBytesWritten = 0;
+	if (lpNumberOfBytesWritten){
+		_lpNumberOfBytesWritten = (LPDWORD)virtual_to_physical_addr(cpu, lpNumberOfBytesWritten);
+	}
+	LPOVERLAPPED _lpOverlapped = 0;
+	if (lpOverlapped){
+		_lpOverlapped = (LPOVERLAPPED)virtual_to_physical_addr(cpu, lpOverlapped);
+	}
+	printf("\nCalling WriteFile(%p, %p, %p, %p, %p)", hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
+	return (uint32_t)WriteFile((HANDLE)hFile, (LPCVOID)_lpBuffer, (DWORD)nNumberOfBytesToWrite, (LPDWORD)_lpNumberOfBytesWritten, (LPOVERLAPPED)_lpOverlapped);
+}
+
+uint32_t thunk_HeapFree(i386* cpu){
+	uint32_t hHeap = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t dwFlags = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t lpMem = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	printf("\nStubbing HeapFree(%p, %p, %p)", hHeap, dwFlags, lpMem);
+	return 1;
+}
+
 uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA,
 									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA,
 									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint,
-									   thunk_GetSystemMetrics, thunk_TranslateAcceleratorA, thunk_GetDC, thunk_ReleaseDC, thunk_SetPixel, thunk_InvalidateRect};
+									   thunk_GetSystemMetrics, thunk_TranslateAcceleratorA, thunk_GetDC, thunk_ReleaseDC, thunk_SetPixel, thunk_InvalidateRect, thunk_HeapAlloc, thunk_HeapCreate,
+									   thunk_GetStdHandle, thunk_GetFileType, thunk_SetHandleCount, thunk_GetACP, thunk_GetCPInfo, thunk_GetEnvironmentStringsW, thunk_FreeEnvironmentStringsW, thunk_WideCharToMultiByte,
+									   thunk_GetModuleFileNameA, thunk_WriteFile, thunk_HeapFree, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 void handle_syscall(i386* cpu){
 	int function_id = cpu->eax;
@@ -463,8 +636,10 @@ void handle_syscall(i386* cpu){
 		cpu->running = 0;
 	}
 	else{
+		//printf("Thunk ID %02x\n", function_id);
+		//printf("Function pointer %p\n", thunk_table[function_id]);
 		cpu->eax = thunk_table[function_id](cpu);
-		printf(" and returning %08x (EIP=%p)", cpu->eax, cpu->eip);
+		printf(" and returning %08x", cpu->eax, cpu->eip);
 	}
 }
 
@@ -527,6 +702,7 @@ void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
 		taken_bases = (TAKEN_BASE*)malloc(sizeof(TAKEN_BASE));
 		taken_bases->base = image->image_base;
 		taken_bases->next = 0;
+		reserve_address_space(cpu, image->image_base, 0x400);
 	}
 	else{
 		image->image_base = find_free_base(optional_header->ImageBase);
@@ -534,6 +710,7 @@ void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
 		taken_bases = (TAKEN_BASE*)malloc(sizeof(TAKEN_BASE));
 		taken_bases->base = image->image_base;
 		taken_bases->next = temp;
+		reserve_address_space(cpu, image->image_base, 0x400);
 	}
 
 	image->entry_point = optional_header->AddressOfEntryPoint + image->image_base;
@@ -541,6 +718,8 @@ void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
 	printf("  Image Base: %p\n", image->image_base);
 	printf("  Entry Point: %p\n", image->entry_point);
 	printf("  Stack Size: %d bytes committed (%d reserved)\n", optional_header->SizeOfStackCommit, optional_header->SizeOfStackReserve);
+	printf("  Heap Size: %d bytes committed (%d reserved)\n", optional_header->SizeOfHeapCommit, optional_header->SizeOfHeapReserve);
+	printf("  Total Size: %d bytes\n", optional_header->SizeOfImage);
 
 	//allocate a stack if none exists
 	uint32_t stack_pde = GET_PDE(STACK_BASE - 0x1000);
@@ -725,18 +904,21 @@ void parse_text(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu){
 	//virtual_mmap(cpu, sec->VirtualAddress + image->image_base, image->data + sec->PointerToRawData); //temporary hack!
 
 	if (cpu->eip == 0){
-		cpu->eip = sec->VirtualAddress + image->image_base;
+		//cpu->eip = sec->VirtualAddress + image->image_base;
 	}
 }
 
 void parse_section_headers(LOADED_PE_IMAGE* image, i386* cpu){
+	uint8_t* lpSection;
+	uint32_t sectionSize;
+
 	IMAGE_SECTION_HEADER current_section; //reloc_pointer & num_relocs don't matter for EXEs
 	image->section_headers = (IMAGE_SECTION_HEADER*)((BYTE*)&(image->nt_headers->OptionalHeader) + image->nt_headers->FileHeader.SizeOfOptionalHeader);
 
 	for (int i = 0; i < image->nt_headers->FileHeader.NumberOfSections; i++){
 		current_section = image->section_headers[i];
 		printf("  Section %s\n", current_section.Name);
-		printf("    Physical Address: %p Virtual Address %p Size: %d\n", current_section.PointerToRawData, current_section.VirtualAddress, current_section.SizeOfRawData);
+		printf("    Physical Address: %p Virtual Address %p Size: %d %d\n", current_section.PointerToRawData, current_section.VirtualAddress, current_section.SizeOfRawData, current_section.Misc.VirtualSize);
 
 		if (strcmp((const char*)current_section.Name, ".text") == 0){
 			parse_text(image, &current_section, cpu);
@@ -745,10 +927,18 @@ void parse_section_headers(LOADED_PE_IMAGE* image, i386* cpu){
 		} else if (strcmp((const char*)current_section.Name, ".reloc") == 0){
 			parse_rt(image, &current_section, cpu);
 		} else if (strcmp((const char*)current_section.Name, ".data") == 0){
-			map_section(cpu, current_section.VirtualAddress + image->image_base, image->data + current_section.PointerToRawData, 8192);
+			//map_section(cpu, current_section.VirtualAddress + image->image_base, image->data + current_section.PointerToRawData, 12288);
+			//memset(image->data + current_section.PointerToRawData, 0, current_section.SizeOfRawData);
+			//*(uint32_t*)virtual_to_physical_addr(cpu, 0x4099c4) = 0x0;
 		}
 
-		map_section(cpu, current_section.VirtualAddress + image->image_base, image->data + current_section.PointerToRawData, current_section.SizeOfRawData);
+		sectionSize = ALIGN(current_section.Misc.VirtualSize, 4096);
+		lpSection = (uint8_t*)malloc(sectionSize);
+		memset(lpSection, 0, sectionSize); //zero it out
+		memcpy(lpSection, image->data + current_section.PointerToRawData, current_section.SizeOfRawData);
+
+		//map_section(cpu, current_section.VirtualAddress + image->image_base, image->data + current_section.PointerToRawData, current_section.SizeOfRawData);
+		map_section(cpu, current_section.VirtualAddress + image->image_base, lpSection, sectionSize);
 	}
 }
 
@@ -1062,9 +1252,9 @@ int main(int argc, char* argv[])
 	FILE* fp;
 
 	int single_step = 1;
-	char option[10];
+	char option[100];
 	char reg[25];
-	uint32_t value, value_2;
+	uint32_t value;
 
 	char buf[100];
 
@@ -1075,11 +1265,15 @@ int main(int argc, char* argv[])
 	parse_headers(&hello, &CPU);
 	CPU.running = 0;
 	CPU.single_step = 1;
+	CPU.eip = hello.entry_point;
 
 	//map the escape routine into RAM somewhere
 	escape_addr = 0xFFFF0000;
 	global_cpu = &CPU;
 	virtual_mmap(&CPU, escape_addr, escape_routine);
+	reserve_address_space(&CPU, 0x00000000, 0x400);
+
+	heap_init();
 
 	while (1){
 		debug_step(&CPU);
