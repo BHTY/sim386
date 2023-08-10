@@ -2,11 +2,16 @@ win32emu To-do List
 - Fix import data directory walking
 - Get FreeCell working (then WinMine, then Doom)
 - Fix the heap manager
-- VirtualAlloc
-- Read resource data directory & implement (rather than stub out) associaed functions
-  - LoadBitmapA, LoadStringA, LoadAcceleratorsA, LoadCursorA
-  - The trouble with these is that they get passed an HINSTANCE. For most intents and purposes (including creation of a window & registering a window class), the emulated application can "borrow" the HINSTANCE of the host, but this is a case where it gets tricky
-  - The simulator can keep a map of all valid HINSTANCEs (both the one assigned by Windows for the EXE and all of the ones assigned by the simulator for DLLs) and thus will know which image is being referenced. It can then go through the relevant image and find the relevant resource and do whatever it needs to be done
+- ``VirtualAlloc``
+- Read resource data directory & implement (rather than stub out) associated functions
+  - ``LoadBitmapA``, ``LoadStringA``, ``LoadAcceleratorsA, ``LoadCursorA``
+  - The trouble with these is that they get passed an ``HINSTANCE``. To make these work right, I'll need to fix my entire approach to ``HINSTANCE``s
+  - Each image loaded by the simulator should have a unique ``HINSTANCE`` (this can just be the image base) recorded in a table in pe_ldr. Whenever an application needs to pass an ``HINSTANCE`` off to Windows (i.e. if it's registering a window class and/or creating a window), assuming the ``HINSTANCE`` is valid, the simulator will pass the ``HINSTANCE`` of the host to the relevant Windows function (right now, it just treats the ``HINSTANCE`` of the exe == the ``HINSTANCE`` of the host)
+    - One function that will need to address this development is ``dummy_WndProc``, which needs to look up the ``HINSTANCE`` (unless the ``CS_GLOBALCLASS`` flag was passed to ``RegisterClass``, which should cause any subsequent calls to ``RegisterClass`` with the same name to fail) as well as the class name (the class name checking should also be modified to support both ANSI and Unicode) - ``dummy_WndProc`` will know its ``HINSTANCE`` because I'll maintain a table of ``HINSTANCE``s to ``HWND``s 
+    - Remember that the way this works is that the ``WNDCLASS`` passed to ``RegisterClass`` contains two identifying items - a classname and an instance handle (along with a pointer to a window procedure). When I call ``CreateWindow``, I pass a classname and an instance handle and get back a window handle. This is when the instance handle, window handle, and window procedure become inextricably linked (until something is freed)
+    - Questions
+      - What happens if ``CreateWindow`` is passed a NULL hInstance? Is it now global or referring to the current process?
+   - When a function like LoadStringA is called, the application will look up the HINSTANCE passed into its table, determine which image is being referenced, and go through the relevant image and find the relevant resource and do whatever it needs to be done
 - Make sure the CRT initialization code actually works and pushes the correct parameters for WinMain/main
 - Iron out CPU bugs (sim386)
   - This isn't a bug so much as a missing feature, but it might be nice to add support for the PEB (since some applications might actually fuck around with that) and thus adding (at least limited) support for the FS segment register
@@ -23,6 +28,7 @@ Good news on the portability front: In pe_ldr.c, aside from the thunks themselve
 - ``debug_step``: Setting a breakpoint pokes ``0xCC`` (``int 3``) into memory at the desired point and there's various parts of the function that explicitly mention ``cpu->eip`` (including the ``g`` instruction to move the program counter, and the breakpoint fixups). This is easily fixed with a ``set_breakpoint()`` function and a ``set_pc()`` function that performs the operation
 - ``handle_syscall``: Assumes that the function ID is held in ``eax`` and that the return value will be too. This is easily addressed with special functions to ``get_syscall_id`` and ``set_return_value`` inside of the relevant CPU core implementation
 - The rest of the functions that actually interact with the CPU only do so to allocate blocks of virtual memory. Since the paging system is effectively an implementation detail, the MIPS core will likely inherit the same paging hierarchy as the 386.
+- **Potential Concern**: There's a lot of code which assumes that everything is 32-bit (pointers, items on the stack, etc.). This shouldn't cause issues with MIPS but it could cause problems with the Alpha (though it shouldn't cause any more problems for AXP64 than AXP32 assuming the virtual memory system works in such a way that all addresses are still within 32-bits)
 
 Core System DLLs (still very barebones)
 - GDI32: 
