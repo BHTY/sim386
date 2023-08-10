@@ -6,7 +6,7 @@ win32emu To-do List
 - Read resource data directory & implement (rather than stub out) associaed functions
 - Iron out CPU bugs (sim386)
 - Reorganize the thunks - split them off from pe_ldr.c with a separate C file for each DLL's thunks (also the low-order byte of the thunk ID should identify the DLL and the upper 24-bits store the function ID)
-- Abstract out the parts of pe_ldr.c that directly manipulate the stack
+- Abstract out the parts of pe_ldr.c that directly manipulate the stack (while this technically isn't CPU-dependent, it is calling convention-dependent, and win32 has different calling conventions on x86 vs MIPS)
   - Instead of directly reading from the stack inside of the thunk functions, they should call a function like uint32_t get_arg(i386* cpu, int arg_id);
     - On i386, such a function would read off of the stack while on MIPS, it would read out of a register
   - Similarly, for functions that have to pass arguments back to the CPU for reverse thunking (i.e. dummy_WndProc), they should use a generic function as well
