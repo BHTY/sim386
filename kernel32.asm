@@ -159,6 +159,14 @@ WriteFile:
 	int SYSCALL_THUNK
 	ret 0x14
 
+global GetProcessHeap
+extern GetProcessHeap
+export GetProcessHeap
+
+GetProcessHeap:
+	mov eax, 1
+	ret
+
 global HeapFree
 extern HeapFree
 export HeapFree
@@ -167,6 +175,39 @@ HeapFree:
 	mov eax, THUNK_KERNEL32_HEAPFREE
 	int SYSCALL_THUNK
 	ret 0xc
+
+global LocalAlloc
+extern LocalAlloc
+export LocalAlloc
+
+LocalAlloc:
+	push ebp
+	mov ebp, esp
+	mov eax, [ebp+0xc]
+	push eax
+	mov eax, [ebp+0x8]
+	push eax
+	call GetProcessHeap
+	push eax
+	call HeapAlloc
+	leave
+	ret 0x8
+
+global LocalFree
+extern LocalFree
+export LocalFree
+
+LocalFree:
+	push ebp
+	mov ebp, esp	
+	mov eax, [ebp+0x8]
+	push eax
+	push 0
+	call GetProcessHeap
+	push eax
+	call HeapFree
+	leave
+	ret 0x4
 
 THUNK_KERNEL32_EXITPROCESS equ 0x01
 THUNK_KERNEL32_GETMODULEHANDLEA equ 0x03

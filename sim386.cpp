@@ -763,6 +763,26 @@ void op_25(i386* cpu){ //AND eax, imm32
 	}
 }
 
+void op_29(i386* cpu){ //SUB r/m16/32, r16/32
+	get_modrm();
+	cpu->eip += 2;
+	printf("SUB ");
+	get_modrm_dst_ptr(1);
+	get_modrm_src_reg_1632();
+
+	switch (cpu->operand_size){
+	case 0:
+		printf("%s", reg_names_16[REG(modrm)]);
+		cpu_sub16(cpu, (uint16_t*)dst_ptr, (uint16_t*)src_ptr);
+		break;
+	case 1:
+		printf("%s", reg_names_32[REG(modrm)]);
+		cpu_sub32(cpu, dst_ptr, src_ptr);
+		break;
+	}
+
+}
+
 void op_2B(i386* cpu){ //SUB r16/32, r/m16/32
 	get_modrm();
 	cpu->eip += 2;
@@ -2081,6 +2101,28 @@ void extended_op_AF(i386* cpu){ //IMUL r16/32, r/m16/32
 	}
 }
 
+void extended_op_B6(i386* cpu){ //MOVZX r32, r/m8
+	printf("MOVZX ");
+	get_modrm();
+	get_modrm_src_reg_1632();
+	printf("%s, ", reg_names_32[REG(modrm)]);
+	cpu->eip += 2;
+	get_modrm_dst_ptr_8(0);
+
+	*src_ptr = (uint32_t)(uint8_t)*dst_ptr;
+}
+
+void extended_op_B7(i386* cpu){ //MOVZX r32, r/m16
+	printf("MOVZX ");
+	get_modrm();
+	get_modrm_src_reg_1632();
+	printf("%s, ", reg_names_32[REG(modrm)]);
+	cpu->eip += 2;
+	get_modrm_dst_ptr(0);
+
+	*src_ptr = (uint32_t)*(uint16_t*)dst_ptr;
+}
+
 void extended_op_BE(i386* cpu){ //MOVSX r16/32, r/m8
 	printf("MOVSX ");
 	get_modrm();
@@ -2090,6 +2132,17 @@ void extended_op_BE(i386* cpu){ //MOVSX r16/32, r/m8
 	get_modrm_dst_ptr_8(0);
 
 	*src_ptr = (int32_t)(int8_t)*dst_ptr;
+}
+
+void extended_op_BF(i386* cpu){ //MOVSX r16/32, r/m16
+	printf("MOVSX ");
+	get_modrm();
+	get_modrm_src_reg_1632();
+	printf("%s, ", reg_names_32[REG(modrm)]);
+	cpu->eip += 2;
+	get_modrm_dst_ptr(0);
+
+	*src_ptr = (int32_t)(int16_t)*dst_ptr;
 }
 
 
@@ -2276,8 +2329,8 @@ void(*extended_op_table[256])(i386* cpu) = {
 	0, //0xb3
 	0, //0xb4
 	0, //0xb5
-	0, //0xb6
-	0, //0xb7
+	extended_op_B6, //0xb6
+	extended_op_B7, //0xb7
 	0, //0xb8
 	0, //0xb9
 	0, //0xba
@@ -2285,7 +2338,7 @@ void(*extended_op_table[256])(i386* cpu) = {
 	0, //0xbc
 	0, //0xbd
 	extended_op_BE, //0xbe
-	0, //0xbf
+	extended_op_BF, //0xbf
 	0, //0xc0
 	0, //0xc1
 	0, //0xc2
@@ -2394,7 +2447,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x26
 	0, //0x27
 	0, //0x28
-	0, //0x29
+	op_29, //0x29
 	0, //0x2a
 	op_2B, //0x2b
 	0, //0x2c

@@ -39,6 +39,18 @@ uint32_t lookup_classname(char* class_name){ //returns a pointer to the WndProc
 	return 0;
 }
 
+uint32_t lookup_classname_timerproc(char* class_name){ //returns a pointer to the TimerProc
+	WINDOW_CLASS* temp = window_classes;
+
+	while (temp){
+		if (strcmp(class_name, temp->class_name) == 0){ //match found
+			return temp->TimerProc;
+		}
+		temp = temp->next;
+	}
+	return 0;
+}
+
 void register_window_class(char* class_name, uint32_t WndProc){
 	WINDOW_CLASS* temp;
 
@@ -57,6 +69,21 @@ void register_window_class(char* class_name, uint32_t WndProc){
 	}
 }
 
+void register_window_timer(HWND hwnd, uint32_t timerproc, int id){
+	char name_buffer[100];
+	GetClassNameA(hwnd, name_buffer, 99);
+
+	WINDOW_CLASS* temp = window_classes;
+
+	while (temp){
+		if (strcmp(name_buffer, temp->class_name) == 0){ //match found
+			temp->TimerProc = timerproc;
+		}
+
+		temp = temp->next;
+	}
+}
+
 LOADED_PE_IMAGE* find_image(char* name){
 	LOADED_IMAGE* cur = loaded_images;
 
@@ -69,6 +96,35 @@ LOADED_PE_IMAGE* find_image(char* name){
 	}
 
 	return 0;
+}
+
+LRESULT CALLBACK dummy_TimerProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam){
+	uint32_t wndproc_addr;
+	HRESULT return_value;
+	LPSTR name_buffer = (LPSTR)malloc(100);
+	GetClassNameA(hWnd, name_buffer, 100);
+	wndproc_addr = lookup_classname_timerproc((char*)name_buffer);
+	free(name_buffer);
+
+	printf("\nThunking TimerProc(%p, %p, %p, %p)", hWnd, msg, wParam, lParam);
+
+	if (wndproc_addr){
+		cpu_push32(global_cpu, &(global_cpu->eip));
+		cpu_push32(global_cpu, (uint32_t*)&lParam);
+		cpu_push32(global_cpu, (uint32_t*)&wParam);
+		cpu_push32(global_cpu, (uint32_t*)&msg);
+		cpu_push32(global_cpu, (uint32_t*)&hWnd);
+
+		//call the function
+		return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr); //it should return into the unthunker
+
+		//pop the arguments off of the stack
+		//global_cpu->esp += 16;
+
+		printf(" Finished TimerProc, EIP=%p!", global_cpu->eip);
+
+		return return_value;
+	}
 }
 
 LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam){
@@ -84,6 +140,7 @@ LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	printf("\nThunking WndProc(%p, %p, %p, %p)", hWnd, msg, wParam, lParam);
 
 	if (wndproc_addr){
+		//printf("||%p||", wndproc_addr);
 		//push the arguments onto the stack
 		cpu_push32(global_cpu, &(global_cpu->eip));
 		cpu_push32(global_cpu, (uint32_t*)&lParam);
@@ -198,12 +255,12 @@ uint32_t thunk_RegisterClassA(i386* cpu){
 	WNDCLASSA* wc = (WNDCLASSA*)virtual_to_physical_addr(cpu, lpWndClass);
 
 	if (wc->lpszClassName){
-		wc->lpszClassName = (LPCSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszClassName);
+		wc->lpszClassName = (LPSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszClassName);
 		register_window_class((char*)wc->lpszClassName, (uint32_t)wc->lpfnWndProc);
 	}
 
 	if (wc->lpszMenuName){
-		wc->lpszMenuName = (LPCSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszMenuName);
+		wc->lpszMenuName = (LPSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszMenuName);
 	}
 
 	wc->lpfnWndProc = dummy_WndProc;
@@ -473,8 +530,9 @@ uint32_t thunk_HeapAlloc(i386* cpu){
 	printf("\nCalling HeapAlloc(%p, %p, %p)", hHeap, dwFlags, dwBytes);
 	uint32_t pointer = heap_alloc(cpu, hHeap, dwBytes);
 
-	if (dwFlags & HEAP_ZERO_MEMORY){
+	if (1 || (dwFlags & HEAP_ZERO_MEMORY)){
 		memset(virtual_to_physical_addr(cpu, pointer), 0, dwBytes);
+		printf(" (zeroing memory)");
 	}
 
 	return pointer;
@@ -621,12 +679,246 @@ uint32_t thunk_HeapFree(i386* cpu){
 	return 1;
 }
 
+uint32_t thunk_GetDeviceCaps(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t index = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	printf("\nCalling GetDeviceCaps(%p, %p)", hdc, index);
+	return (uint32_t)GetDeviceCaps((HDC)hdc, (int)index);
+}
+
+uint32_t thunk_CreateSolidBrush(i386* cpu){
+	uint32_t color = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling CreateSolidBrush(%p)", color);
+	return (uint32_t)CreateSolidBrush((COLORREF)color);
+}
+
+uint32_t thunk_LoadStringA(i386* cpu){
+	uint32_t hInstance = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t uID = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t lpBuffer = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t cchBufferMax = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	LPSTR _lpBuffer = (LPSTR)virtual_to_physical_addr(cpu, lpBuffer);
+	*_lpBuffer = 0;
+	printf("\nCalling LoadStringA(%p, %p, %p, %p)", hInstance, uID, lpBuffer, cchBufferMax);
+	return 0;
+}
+
+uint32_t thunk_GetTextMetricsA(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lptm = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	LPTEXTMETRICA _lptm = (LPTEXTMETRICA)virtual_to_physical_addr(cpu, lptm);
+	printf("\nCalling GetTextMetricsA(%p, %p)", hdc, lptm);
+	return (uint32_t)GetTextMetricsA((HDC)hdc, (LPTEXTMETRICA)_lptm);
+}
+
+uint32_t thunk_SelectObject(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t h = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	printf("\nCalling SelectObject(%p, %p)", hdc, h);
+	return (uint32_t)SelectObject((HDC)hdc, (HGDIOBJ)h);
+}
+
+uint32_t thunk_PatBlt(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t x = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t y = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t w = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t h = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	uint32_t rop = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 24);
+	printf("\nCalling PatBlt(%p, %p, %p, %p, %p, %p)", hdc, x, y, w, h, rop);
+	return (uint32_t)PatBlt((HDC)hdc, (int)x, (int)y, (int)w, (int)h, (DWORD)rop);
+}
+
+uint32_t thunk_SetWindowTextA(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpString = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	LPCSTR _lpString = 0;
+	if (lpString){
+		_lpString = (LPCSTR)virtual_to_physical_addr(cpu, lpString);
+	}
+	printf("\nCalling SetWindowTextA(%p, %p)", hWnd, lpString);
+	return (uint32_t)SetWindowTextA((HWND)hWnd, (LPCSTR)_lpString);
+}
+
+uint32_t thunk_GetMenu(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling GetMenu(%p)", hWnd);
+	return (uint32_t)GetMenu((HWND)hWnd);
+}
+
+uint32_t thunk_CheckMenuItem(i386* cpu){
+	uint32_t hMenu = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t uIDCheckItem = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t uCheck = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	printf("\nCalling CheckMenuItem(%p, %p, %p)", hMenu, uIDCheckItem, uCheck);
+	return (uint32_t)CheckMenuItem((HMENU)hMenu, (UINT)uIDCheckItem, (UINT)uCheck);
+}
+
+uint32_t thunk_SetCursorPos(i386* cpu){
+	uint32_t X = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t Y = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	printf("\nCalling SetCursorPos(%p, %p)", X, Y);
+	return (uint32_t)SetCursorPos((int)X, (int)Y);
+}
+
+uint32_t thunk_ClientToScreen(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpPoint = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	LPPOINT _lpPoint = (LPPOINT)virtual_to_physical_addr(cpu, lpPoint);
+	printf("\nCalling ClientToScreen(%p, %p)", hWnd, lpPoint);
+	return (uint32_t)ClientToScreen((HWND)hWnd, (LPPOINT)_lpPoint);
+}
+
+uint32_t thunk_LineTo(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t x = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t y = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	printf("\nCalling LineTo(%p, %p, %p)", hdc, x, y);
+	return (uint32_t)LineTo((HDC)hdc, (int)x, (int)y);
+}
+
+uint32_t thunk_MoveToEx(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t x = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t y = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lppt = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	LPPOINT _lppt = 0;
+	if (lppt){
+		_lppt = (LPPOINT)virtual_to_physical_addr(cpu, lppt);
+	}
+	printf("\nCalling MoveToEx(%p, %p, %p, %p)", hdc, x, y, lppt);
+	return (uint32_t)MoveToEx((HDC)hdc, (int)x, (int)y, (LPPOINT)_lppt);
+}
+
+uint32_t thunk_TextOutA(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t x = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t y = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lpString = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t c = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	LPCSTR _lpString = (LPCSTR)virtual_to_physical_addr(cpu, lpString);
+	printf("\nCalling TextOutA(%p, %p, %p, %p, %p)", hdc, x, y, lpString, c);
+	return (uint32_t)TextOutA((HDC)hdc, (int)x, (int)y, (LPCSTR)_lpString, (int)c);
+}
+
+uint32_t thunk_GetTextExtentPointA(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpString = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t c = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lpsz = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	LPCSTR _lpString = (LPCSTR)virtual_to_physical_addr(cpu, lpString);
+	LPSIZE _lpsz = (LPSIZE)virtual_to_physical_addr(cpu, lpsz);
+	printf("\nCalling GetTextExtentPointA(%p, %p, %p, %p)", hdc, lpString, c, lpsz);
+	return (uint32_t)GetTextExtentPointA((HDC)hdc, (LPCSTR)_lpString, (int)c, (LPSIZE)_lpsz);
+}
+
+uint32_t thunk_DeleteObject(i386* cpu){
+	uint32_t ho = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling DeleteObject(%p)", ho);
+	return (uint32_t)DeleteObject((HGDIOBJ)ho);
+}
+
+uint32_t thunk_SetCapture(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling SetCapture(%p)", hWnd);
+	return (uint32_t)SetCapture((HWND)hWnd);
+}
+
+uint32_t thunk_ReleaseCapture(i386* cpu){
+	printf("\nCalling ReleaseCapture()");
+	return (uint32_t)ReleaseCapture();
+}
+
+uint32_t thunk_ShowCursor(i386* cpu){
+	uint32_t bShow = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling ShowCursor(%p)", bShow);
+	return (uint32_t)ShowCursor((BOOL)bShow);
+}
+
+uint32_t thunk_SetCursor(i386* cpu){
+	uint32_t hCursor = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling SetCursor(%p)", hCursor);
+	return (uint32_t)SetCursor((HCURSOR)hCursor);
+}
+
+uint32_t thunk_SetFocus(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling SetFocus(%p)", hWnd);
+	return (uint32_t)SetFocus((HWND)hWnd);
+}
+
+uint32_t thunk_PostMessageA(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t Msg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t wParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	LPARAM _lParam = (LPARAM)virtual_to_physical_addr(cpu, lParam);
+	printf("\nCalling PostMessageA(%p, %p, %p, %p)", hWnd, Msg, wParam, lParam);
+	return (uint32_t)PostMessageA((HWND)hWnd, (UINT)Msg, (WPARAM)wParam, (LPARAM)_lParam);
+}
+
+uint32_t thunk_EnableMenuItem(i386* cpu){
+	uint32_t hMenu = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t uIDEnableItem = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t uEnable = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	printf("\nCalling EnableMenuItem(%p, %p, %p)", hMenu, uIDEnableItem, uEnable);
+	return (uint32_t)EnableMenuItem((HMENU)hMenu, (UINT)uIDEnableItem, (UINT)uEnable);
+}
+
+uint32_t thunk_IsIconic(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling IsIconic(%p)", hWnd);
+	return (uint32_t)IsIconic((HWND)hWnd);
+}
+
+uint32_t thunk_GetKeyState(i386* cpu){
+	uint32_t nVirtKey = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling GetKeyState(%p)", nVirtKey);
+	return (uint32_t)GetKeyState((int)nVirtKey);
+}
+
+uint32_t thunk_SetTimer(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t nIDEvent = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t uElapse = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lpTimerFunc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	TIMERPROC _lpTimerFunc = 0;
+
+	if (lpTimerFunc){
+		_lpTimerFunc = (TIMERPROC)dummy_TimerProc;
+		register_window_timer((HWND)hWnd, lpTimerFunc, nIDEvent);
+	}
+
+	printf("\nCalling SetTimer(%p, %p, %p, %p)", hWnd, nIDEvent, uElapse, lpTimerFunc);
+	return (uint32_t)SetTimer((HWND)hWnd, (UINT_PTR)nIDEvent, (UINT)uElapse, (TIMERPROC)_lpTimerFunc);
+}
+
+uint32_t thunk_KillTimer(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t uIDEvent = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	printf("\nCalling KillTimer(%p, %p)", hWnd, uIDEvent);
+	return (uint32_t)KillTimer((HWND)hWnd, (UINT_PTR)uIDEvent);
+}
+
+uint32_t thunk_Ellipse(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t left = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t top = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t right = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t bottom = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	printf("\nCalling Ellipse(%p, %p, %p, %p, %p)", hdc, left, top, right, bottom);
+	return (uint32_t)Ellipse((HDC)hdc, (int)left, (int)top, (int)right, (int)bottom);
+}
+
 uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA,
 									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA,
 									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint,
 									   thunk_GetSystemMetrics, thunk_TranslateAcceleratorA, thunk_GetDC, thunk_ReleaseDC, thunk_SetPixel, thunk_InvalidateRect, thunk_HeapAlloc, thunk_HeapCreate,
 									   thunk_GetStdHandle, thunk_GetFileType, thunk_SetHandleCount, thunk_GetACP, thunk_GetCPInfo, thunk_GetEnvironmentStringsW, thunk_FreeEnvironmentStringsW, thunk_WideCharToMultiByte,
-									   thunk_GetModuleFileNameA, thunk_WriteFile, thunk_HeapFree, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+									   thunk_GetModuleFileNameA, thunk_WriteFile, thunk_HeapFree, thunk_GetDeviceCaps, thunk_CreateSolidBrush, thunk_LoadStringA, thunk_GetTextMetricsA, thunk_SelectObject, 
+									   thunk_PatBlt, thunk_SetWindowTextA, thunk_GetMenu, thunk_CheckMenuItem, thunk_SetCursorPos, thunk_ClientToScreen, thunk_LineTo, thunk_MoveToEx,
+									   thunk_TextOutA, thunk_GetTextExtentPointA, thunk_DeleteObject, thunk_SetCapture, thunk_ReleaseCapture, thunk_ShowCursor, thunk_SetCursor, thunk_SetFocus,
+									   thunk_PostMessageA, thunk_EnableMenuItem, thunk_IsIconic, thunk_GetKeyState, thunk_SetTimer, thunk_KillTimer, thunk_Ellipse, 0};
 
 void handle_syscall(i386* cpu){
 	int function_id = cpu->eax;
@@ -772,7 +1064,18 @@ void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
 	}
 
 	//parse import directory -- this one's important
+	
 	//parse resource directory
+	data_dir = &(optional_header->DataDirectory[2]);
+	IMAGE_RESOURCE_DIRECTORY* imageResourceDirectory;
+	int total_entries;
+
+	if (data_dir->Size != 0){
+		imageResourceDirectory = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, data_dir->VirtualAddress + image->image_base);
+		total_entries = imageResourceDirectory->NumberOfNamedEntries + imageResourceDirectory->NumberOfIdEntries;
+		printf("  Resource Directory: %d bytes (%d entries)\n", data_dir->Size, total_entries);
+	}
+
 	//parse exception directory
 	//parse security directory
 	//parse base relocation table
@@ -930,6 +1233,8 @@ void parse_section_headers(LOADED_PE_IMAGE* image, i386* cpu){
 			//map_section(cpu, current_section.VirtualAddress + image->image_base, image->data + current_section.PointerToRawData, 12288);
 			//memset(image->data + current_section.PointerToRawData, 0, current_section.SizeOfRawData);
 			//*(uint32_t*)virtual_to_physical_addr(cpu, 0x4099c4) = 0x0;
+		}else if (strcmp((const char*)current_section.Name, ".rsrc") == 0){
+			image->resource_offset = current_section.VirtualAddress;
 		}
 
 		sectionSize = ALIGN(current_section.Misc.VirtualSize, 4096);

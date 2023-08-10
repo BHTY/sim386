@@ -213,7 +213,167 @@ InvalidateRect:
 	mov eax, THUNK_USER32_INVALIDATERECT
 	int SYSCALL_THUNK
 	ret 0x0C
+	
+global LoadAcceleratorsA
+extern LoadAcceleratorsA
+export LoadAcceleratorsA
 
+LoadAcceleratorsA:
+	mov eax, 0
+	ret 0x8
+	
+global LoadStringA
+extern LoadStringA
+export LoadStringA
+
+LoadStringA:
+	mov eax, THUNK_USER32_LOADSTRINGA
+	int SYSCALL_THUNK
+	ret 0x10
+	
+global SetWindowTextA
+extern SetWindowTextA
+export SetWindowTextA
+
+SetWindowTextA:
+	mov eax, THUNK_USER32_SETWINDOWTEXTA
+	int SYSCALL_THUNK
+	ret 0x8
+	
+global GetMenu
+extern GetMenu
+export GetMenu
+
+GetMenu:
+	mov eax, THUNK_USER32_GETMENU
+	int SYSCALL_THUNK
+	ret 0x4
+
+global CheckMenuItem
+extern CheckMenuItem
+export CheckMenuItem
+
+CheckMenuItem:
+	mov eax, THUNK_USER32_CHECKMENUITEM
+	int SYSCALL_THUNK
+	ret 0xc
+	
+global SetCursorPos
+extern SetCursorPos
+export SetCursorPos
+
+SetCursorPos:
+	mov eax, THUNK_USER32_SETCURSORPOS
+	int SYSCALL_THUNK
+	ret 0x8
+	
+global ClientToScreen
+extern ClientToScreen
+export ClientToScreen
+
+ClientToScreen:
+	mov eax, THUNK_USER32_CLIENTTOSCREEN
+	int SYSCALL_THUNK
+	ret 0x8
+
+global SetCapture
+extern SetCapture
+export SetCapture
+
+SetCapture:
+	mov eax, THUNK_USER32_SETCAPTURE
+	int SYSCALL_THUNK
+	ret 0x4
+
+global ReleaseCapture
+extern ReleaseCapture
+export ReleaseCapture
+
+ReleaseCapture:
+	mov eax, THUNK_USER32_RELEASECAPTURE
+	int SYSCALL_THUNK
+	ret 0x0
+
+global ShowCursor
+extern ShowCursor
+export ShowCursor
+
+ShowCursor:
+	mov eax, THUNK_USER32_SHOWCURSOR
+	int SYSCALL_THUNK
+	ret 0x4
+
+global SetCursor
+extern SetCursor
+export SetCursor
+
+SetCursor:
+	mov eax, THUNK_USER32_SETCURSOR
+	int SYSCALL_THUNK
+	ret 0x4
+
+global SetFocus
+extern SetFocus
+export SetFocus
+
+SetFocus:
+	mov eax, THUNK_USER32_SETFOCUS
+	int SYSCALL_THUNK
+	ret 0x4
+
+global PostMessageA
+extern PostMessageA
+export PostMessageA
+
+PostMessageA:
+	mov eax, THUNK_USER32_POSTMESSAGEA
+	int SYSCALL_THUNK
+	ret 0x10
+
+global EnableMenuItem
+extern EnableMenuItem
+export EnableMenuItem
+
+EnableMenuItem:
+	mov eax, THUNK_USER32_ENABLEMENUITEM
+	int SYSCALL_THUNK
+	ret 0xc
+
+global IsIconic
+extern IsIconic
+export IsIconic
+
+IsIconic:
+	mov eax, THUNK_USER32_ISICONIC
+	int SYSCALL_THUNK
+	ret 0x4
+
+global GetKeyState
+extern GetKeyState
+export GetKeyState
+
+GetKeyState:
+	mov eax, THUNK_USER32_GETKEYSTATE
+	int SYSCALL_THUNK
+	ret 0x4
+
+global SetTimer
+extern SetTimer
+export SetTimer
+
+SetTimer:
+	mov eax, THUNK_USER32_SETTIMER
+	int SYSCALL_THUNK
+	ret 0x10
+
+global KillTimer
+extern KillTimer
+export KillTimer
+
+KillTimer:
+	mov eax, THUNK_USER32_KILLTIMER
+	int SYSCALL_THUNK
+	ret 0x8
 
 THUNK_USER32_MESSAGEBOXA equ 0x00
 THUNK_USER32_LOADCURSORA equ 0x04
@@ -238,4 +398,21 @@ THUNK_USER32_TRANSLATEACCELERATORA equ 0x19
 THUNK_USER32_GETDC equ 0x1A
 THUNK_USER32_RELEASEDC equ 0x1B
 THUNK_USER32_INVALIDATERECT equ 0x1D
+THUNK_USER32_LOADSTRINGA equ 0x2D
+THUNK_USER32_SETWINDOWTEXTA equ 0x31
+THUNK_USER32_GETMENU equ 0x32
+THUNK_USER32_CHECKMENUITEM equ 0x33
+THUNK_USER32_SETCURSORPOS equ 0x34
+THUNK_USER32_CLIENTTOSCREEN equ 0x35
+THUNK_USER32_SETCAPTURE equ 0x3B
+THUNK_USER32_RELEASECAPTURE equ 0x3C
+THUNK_USER32_SHOWCURSOR equ 0x3D
+THUNK_USER32_SETCURSOR equ 0x3E
+THUNK_USER32_SETFOCUS equ 0x3F
+THUNK_USER32_POSTMESSAGEA equ 0x40
+THUNK_USER32_ENABLEMENUITEM equ 0x41
+THUNK_USER32_ISICONIC equ 0x42
+THUNK_USER32_GETKEYSTATE equ 0x43
+THUNK_USER32_SETTIMER equ 0x44
+THUNK_USER32_KILLTIMER equ 0x45
 SYSCALL_THUNK equ 0x80

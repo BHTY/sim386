@@ -47,6 +47,7 @@ typedef struct{
 	IMAGE_SECTION_HEADER* section_headers;
 	IMPORT_TABLE* import_table;
 	EXPORTED_FUNCTION *export_table;
+	uint32_t resource_offset;
 } LOADED_PE_IMAGE;
 
 typedef struct LOADED_IMAGE{
@@ -57,6 +58,7 @@ typedef struct LOADED_IMAGE{
 
 typedef struct WINDOW_CLASS{
 	uint32_t WndProc;
+	uint32_t TimerProc;
 	char class_name[100];
 	struct WINDOW_CLASS* next;
 } WINDOW_CLASS;
