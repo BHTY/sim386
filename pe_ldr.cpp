@@ -28,6 +28,10 @@ time_t start_time;
 LOADED_IMAGE* loaded_images;
 WINDOW_CLASS* window_classes;
 
+uint16_t temp_window_class = 0;
+REGISTERED_WINDOW_CLASS registered_window_classes[65536];
+ACTIVE_WINDOW* window_list;
+
 EMU_HINSTANCE* root_instance = 0;
 
 uint32_t escape_addr;
@@ -36,6 +40,52 @@ i386* global_cpu;
 uint32_t Address_EnvironmentStringsA = 0;
 uint32_t Address_EnvironmentStringsW = 0;
 uint32_t Address_CommandLine = 0;
+
+void add_window(uint32_t hwnd, uint16_t wndclass) {
+	ACTIVE_WINDOW* window = window_list;
+	ACTIVE_WINDOW* prevWindow = window_list;
+	ACTIVE_WINDOW* newWindow = (ACTIVE_WINDOW*)malloc(sizeof(ACTIVE_WINDOW));
+	newWindow->hwnd = hwnd;
+	newWindow->wndclass = wndclass;
+	newWindow->timers = 0;
+	newWindow->next = 0;
+
+	if (window_list == 0) {
+		window_list = newWindow;
+		return;
+	}
+
+	while (window) {
+		prevWindow = window;
+		window = window->next;
+	}
+
+	prevWindow->next = newWindow;
+	return;
+}
+
+ACTIVE_WINDOW* find_window(uint32_t hwnd) {
+	ACTIVE_WINDOW* window = window_list;
+
+	while (window) {
+		if (window->hwnd == hwnd) return window;
+		window = window->next;
+	}
+
+	return 0;
+}
+
+uint16_t find_window_class(uint32_t hInstance, LPWSTR name) {
+	for (int i = 0; i < 65536; i++) {
+		if (registered_window_classes[i].used && registered_window_classes[i].hInstance->image_base == hInstance) {
+			if (wcscmp(name, registered_window_classes[i].class_name) == 0) {
+				return i;
+			}
+		}
+	}
+
+	return 0;
+}
 
 EMU_HINSTANCE* find_instance(uint32_t hInstance) {
 	EMU_HINSTANCE* instance = root_instance;
@@ -171,43 +221,38 @@ LRESULT CALLBACK dummy_TimerProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 }
 
 LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam){
-	//return DefWindowProcA(hWnd, msg, wParam, lParam);
-
-	HRESULT return_value;
+	ACTIVE_WINDOW* window = find_window((uint32_t)hWnd);
 	uint32_t wndproc_addr;
-	LPSTR name_buffer = (LPSTR)malloc(100);
-	GetClassNameA(hWnd, name_buffer, 100);
-	wndproc_addr = lookup_classname((char*)name_buffer);
-	free(name_buffer);
+	LRESULT return_value;
 
 	printf("\nThunking WndProc(%p, %p, %p, %p) to ", hWnd, msg, wParam, lParam);
 
-	if (wndproc_addr){
-
-		//printf("||%p||", wndproc_addr);
-		//push the arguments onto the stack
-		cpu_push32(global_cpu, &(global_cpu->eip));
-		cpu_push32(global_cpu, (uint32_t*)&lParam);
-		cpu_push32(global_cpu, (uint32_t*)&wParam);
-		cpu_push32(global_cpu, (uint32_t*)&msg);
-		cpu_push32(global_cpu, (uint32_t*)&hWnd);
-
-		printf("0x%p ", wndproc_addr);
-
-		//call the function
-		return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr); //it should return into the unthunker
-
-		//pop the arguments off of the stack
-		//global_cpu->esp += 16;
-
-		printf(" Finished WndProc, EIP=%p!", global_cpu->eip);
-
-		return return_value;
+	if (window) {
+		wndproc_addr = registered_window_classes[window->wndclass].wndproc;
 	}
-	else{
-		printf("No WndProc found!\n");
-		return DefWindowProcA(hWnd, msg, wParam, lParam);
+	else {
+		if (temp_window_class) {
+			wndproc_addr = registered_window_classes[temp_window_class].wndproc;
+		}
+		else {
+			printf("No WndProc found!\n");
+			return DefWindowProcA(hWnd, msg, wParam, lParam);
+		}
 	}
+
+	//push the args onto the stack
+	cpu_push32(global_cpu, &(global_cpu->eip));
+	cpu_push32(global_cpu, (uint32_t*)&lParam);
+	cpu_push32(global_cpu, (uint32_t*)&wParam);
+	cpu_push32(global_cpu, (uint32_t*)&msg);
+	cpu_push32(global_cpu, (uint32_t*)&hWnd);
+	printf("0x%p ", wndproc_addr);
+
+	//call the function
+	return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr);
+	printf(" Finished WndProc, EIP=%p!", global_cpu->eip);
+
+	return return_value;
 }
 
 uint32_t thunk_MessageBoxA(i386* cpu){
@@ -256,18 +301,11 @@ uint32_t thunk_SetBkMode(i386* cpu){
 
 uint32_t thunk_GetModuleHandleA(i386* cpu){
 	uint32_t lpModuleName = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
-	LPCSTR moduleName;
-
-	printf("\nCalling GetModuleHandleA(%p)", lpModuleName);
-
-	if (lpModuleName == 0){
-		moduleName = 0;
-	}
-	else{
-		moduleName = (LPCSTR)virtual_to_physical_addr(cpu, lpModuleName);
+	
+	if (lpModuleName) { //this indicates the name of another module, so we should find its HINSTANCE
 	}
 
-	return (uint32_t)GetModuleHandleA(moduleName);
+	return (uint32_t)root_instance->image_base;
 }
 
 uint32_t thunk_LoadCursorA(i386* cpu){
@@ -305,23 +343,56 @@ uint32_t thunk_LoadIconA(i386* cpu){
 }
 
 uint32_t thunk_RegisterClassA(i386* cpu){
+	IMAGE_RESOURCE_DATA_ENTRY* menu_data_entry;
+	LPWSTR menu_name;
+
+	REGISTERED_WINDOW_CLASS window_class;
+	uint16_t return_atom = 0;
 	uint32_t lpWndClass = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	WNDCLASSA* wc = (WNDCLASSA*)virtual_to_physical_addr(cpu, lpWndClass);
 
-	if (wc->lpszClassName){
+	//replace wc->lpszClassName
+	if (wc->lpszClassName != 0) {
 		wc->lpszClassName = (LPSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszClassName);
-		register_window_class((char*)wc->lpszClassName, (uint32_t)wc->lpfnWndProc);
+		window_class.class_name = (LPWSTR)malloc(strlen(wc->lpszClassName) * 2 + 2);
+		MultiByteToWideChar(CP_ACP, 0, wc->lpszClassName, -1, window_class.class_name, strlen(wc->lpszClassName) + 1);
+	}
+	
+	//fill in window_class with the core variables (including a copy of the class name)
+	window_class.global = 0;
+	window_class.wndproc = (uint32_t)wc->lpfnWndProc;
+	window_class.hInstance = find_instance((uint32_t)wc->hInstance);
+	window_class.used = 1;
+	
+	//find the menu and then use LoadMenuIndirectA
+	if (wc->lpszMenuName) {
+		if ((uint32_t)wc->lpszMenuName > 65535) {
+			menu_name = (LPWSTR)malloc(strlen(wc->lpszMenuName) * 2 + 2);
+			MultiByteToWideChar(CP_ACP, 0, wc->lpszMenuName, -1, menu_name, strlen(wc->lpszMenuName) + 1);
+		}
+		else {
+			menu_name = (LPWSTR)wc->lpszMenuName;
+		}
+		menu_data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, window_class.hInstance->image_base + window_class.hInstance->root_rsdir, (LPWSTR)RT_MENU, menu_name, 0, (uint32_t)wc->lpszMenuName > 65535));
+		window_class.hMenu = LoadMenuIndirectA(virtual_to_physical_addr(cpu, window_class.hInstance->image_base + menu_data_entry->OffsetToData));
+		printf("\n%p\n", window_class.hMenu);
+		wc->lpszMenuName = 0;
 	}
 
-	if (wc->lpszMenuName){ //this can also be an integer
-		wc->lpszMenuName = (LPSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszMenuName);
-	}
-
+	//dummy out WndProc & replace HINSTANCE with GetModuleHandle(NULL)
 	wc->lpfnWndProc = dummy_WndProc;
+	wc->hInstance = GetModuleHandle(NULL);
 
-	printf("\nCalling RegisterClassA(%p)", lpWndClass);
+	//call RegisterClassA and store the returned atom in window_class
+	return_atom = RegisterClassA(wc);
+	//store into the window class table and return
+	if (return_atom) {
+		registered_window_classes[return_atom] = window_class;
+	}
 
-	return RegisterClassA(wc);
+	printf("\nCalling RegisterClassA(%p) with result %04x", lpWndClass, return_atom);
+
+	return return_atom;
 }
 
 uint32_t global;
@@ -340,24 +411,49 @@ uint32_t thunk_CreateWindowExA(i386* cpu){
 	uint32_t hInstance = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 44);
 	uint32_t lpParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 48);
 
+	uint16_t wndclass;
+	LPSTR _lpClassName;
+	LPWSTR wide_lpClassName;
+	LPSTR _lpWindowName = 0;
+	LPVOID _lpParam = 0;
+
 	printf("\nCalling CreateWindowExA(%p, %p, %p, %p, %p, %p, %p, %p, %p, %p, %p, %p)", dwExStyle, lpClassName, lpWindowName, dwStyle, X, Y, nWidth, nHeight, hWndParent, hMenu, hInstance, lpParam);
 
-	LPCSTR className = 0;
-	LPCSTR windowName = 0;
-	LPVOID param = (LPVOID)lpParam;
-
-	if (lpWindowName){
-		windowName = (LPCSTR)virtual_to_physical_addr(cpu, lpWindowName);
+	if (lpClassName) {
+		if (lpClassName < 65536) { //atom
+			_lpClassName = (LPSTR)lpClassName;
+			wndclass = (uint16_t)_lpClassName;
+		}
+		else { //string
+			_lpClassName = (LPSTR)virtual_to_physical_addr(cpu, lpClassName);
+			wide_lpClassName = (LPWSTR)malloc(strlen(_lpClassName) * 2 + 2);
+			MultiByteToWideChar(CP_ACP, 0, _lpClassName, -1, wide_lpClassName, strlen(_lpClassName) + 1);
+			wndclass = find_window_class(hInstance, wide_lpClassName);
+			free(wide_lpClassName);
+		}
 	}
 
-	if (lpClassName){
-		className = (LPCSTR)virtual_to_physical_addr(cpu, lpClassName);
+	if (lpWindowName) {
+		_lpWindowName = (LPSTR)virtual_to_physical_addr(cpu, lpWindowName);
 	}
 
-	uint32_t retval = (uint32_t)CreateWindowExA(dwExStyle, className, windowName, dwStyle, X, Y, nWidth, nHeight, (HWND)hWndParent, (HMENU)hMenu, (HINSTANCE)hInstance, param);
-	/*global = retval;
-	printf("Window Handle: %d\n", retval);*/
+	if (hMenu == 0) {
+		hMenu = (uint32_t)registered_window_classes[wndclass].hMenu;
+	}
 
+	if (lpParam) {
+		_lpParam = (LPVOID)virtual_to_physical_addr(cpu, lpParam);
+	}
+
+	hInstance = (uint32_t)GetModuleHandle(NULL);
+
+	//we need to save the window class into a temporary variable so that WndProc can work before the application is done being set up
+	temp_window_class = wndclass;
+	uint32_t retval = (uint32_t)CreateWindowExA(dwExStyle, _lpClassName, _lpWindowName, dwStyle, X, Y, nWidth, nHeight, (HWND)hWndParent, (HMENU)hMenu, (HINSTANCE)hInstance, _lpParam);
+	temp_window_class = 0;
+
+	add_window(retval, wndclass);
+	
 	return retval;
 }
 
@@ -460,6 +556,10 @@ uint32_t thunk_RegisterClassExA(i386* cpu){
 	wc->lpfnWndProc = dummy_WndProc;
 
 	printf("\nCalling RegisterClassExA(%p)", lpWndClass);
+
+	printf("\nNot really, this function is broken!\n");
+
+	while (1);
 
 	return RegisterClassExA(wc);
 }
@@ -1295,10 +1395,49 @@ void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
 
 void parse_id(LOADED_PE_IMAGE* image, IMAGE_IMPORT_DESCRIPTOR* import_desc, BYTE* address_base, i386* cpu);
 
-void parse_rsdir_entry();
+//pass a 0 for ID and a 1 for name
 
-void parse_rsdir(i386* cpu, int num_spaces, uint32_t addr_base, uint32_t addr_rsdir){
+IMAGE_RESOURCE_DIRECTORY_ENTRY* find_resource_entry(i386* cpu, uint32_t pRootDirectory, IMAGE_RESOURCE_DIRECTORY* rsDir, LPWSTR id, int name_or_id) {
+	IMAGE_RESOURCE_DIRECTORY_ENTRY* dirEntry = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(rsDir + 1);
+	LPWSTR name;
 
+	for (int i = 0; i < rsDir->NumberOfNamedEntries; i++) {
+		if (name_or_id && dirEntry->NameIsString) {
+			name = (LPWSTR)virtual_to_physical_addr(cpu, pRootDirectory + dirEntry->NameOffset);
+			if (wcscmp(name, id) == 0) return dirEntry;
+		}
+
+		dirEntry++;
+	}
+
+	for (int i = 0; i < rsDir->NumberOfIdEntries; i++) {
+		if (!name_or_id && !dirEntry->NameIsString) {
+			if ((WORD)id == dirEntry->Id) return dirEntry;
+		}
+
+		dirEntry++;
+	}
+
+	return 0;
+}
+
+uint32_t find_resource(i386* cpu, uint32_t pRootDirectory, LPWSTR resourceType, LPWSTR resourceName, int type_id, int name_id) {
+	IMAGE_RESOURCE_DIRECTORY* imageResourceDirectory = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, pRootDirectory);
+	IMAGE_RESOURCE_DIRECTORY_ENTRY* dirEntry;
+	IMAGE_RESOURCE_DIRECTORY* rsDir2;
+	IMAGE_RESOURCE_DIRECTORY_ENTRY* dirEntry2;
+	IMAGE_RESOURCE_DIRECTORY* rsDir3;
+	IMAGE_RESOURCE_DIRECTORY_ENTRY* dirEntry3;
+
+	//parse the top-level directory to find the directory with the list of resources of the current type
+	dirEntry = find_resource_entry(cpu, pRootDirectory, imageResourceDirectory, resourceType, type_id);
+	//parse the layer 1 directory to find the resource of the correct name/ID
+	rsDir2 = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, pRootDirectory + (dirEntry->OffsetToData & 0x7FFFFFFF));
+	dirEntry2 = find_resource_entry(cpu, pRootDirectory, rsDir2, resourceName, name_id);
+	rsDir3 = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, pRootDirectory + (dirEntry2->OffsetToData & 0x7FFFFFFF));
+	dirEntry3 = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(rsDir3 + 1);
+
+	return pRootDirectory + (dirEntry3->OffsetToData & 0x7FFFFFFF);
 }
 
 void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
@@ -1356,73 +1495,6 @@ void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
 	//parse resource directory
 	data_dir = &(optional_header->DataDirectory[2]);
 	add_instance(image->image_base, data_dir->VirtualAddress);
-
-	IMAGE_RESOURCE_DIRECTORY* imageResourceDirectory;
-	IMAGE_RESOURCE_DIRECTORY_ENTRY* dirEntry;
-	IMAGE_RESOURCE_DIRECTORY* subdir;
-	IMAGE_RESOURCE_DIRECTORY_ENTRY* subDirEntry;
-	IMAGE_RESOURCE_DIRECTORY* subSubdir;
-	IMAGE_RESOURCE_DIRECTORY_ENTRY* subSubDirEntry;
-	IMAGE_RESOURCE_DATA_ENTRY* entry;
-	uint32_t pointer;
-	uint32_t pointer2;
-
-	int total_entries;
-
-	if (data_dir->Size != 0){
-		printf("%p\n", data_dir->VirtualAddress);
-		imageResourceDirectory = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, data_dir->VirtualAddress + image->image_base);
-		total_entries = imageResourceDirectory->NumberOfNamedEntries + imageResourceDirectory->NumberOfIdEntries;
-		printf("  Resource Directory: %d bytes (%d entries)\n", data_dir->Size, total_entries);
-
-		dirEntry = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)((uint8_t*)imageResourceDirectory + sizeof(IMAGE_RESOURCE_DIRECTORY));
-
-		for (int i = 0; i < imageResourceDirectory->NumberOfNamedEntries; i++){
-			printf("    abc\n");
-			dirEntry++;
-		}
-
-		for (int i = 0; i < imageResourceDirectory->NumberOfIdEntries; i++){
-			printf("    Directory Entry ID: %d points to ", dirEntry->Id);
-			pointer = image->image_base + data_dir->VirtualAddress + (dirEntry->OffsetToDirectory & 0x7FFFFFFF);
-			if (dirEntry->DataIsDirectory){
-				printf("directory at %p\n", pointer);
-				subdir = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, pointer);
-				printf("      Resource Directory: %d entries\n", subdir->NumberOfIdEntries + subdir->NumberOfNamedEntries);
-				subDirEntry = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(subdir + 1);
-				for (int p = 0; p < subdir->NumberOfNamedEntries; p++){
-					printf("        Name: %p IsDirectory: %d\n", image->image_base + data_dir->VirtualAddress + subDirEntry->NameOffset, subDirEntry->DataIsDirectory);
-					subDirEntry++;
-				}
-				for (int p = 0; p < subdir->NumberOfIdEntries; p++){
-					pointer2 = image->image_base + data_dir->VirtualAddress + (subDirEntry->OffsetToDirectory & 0x7FFFFFFF);
-					printf("        ID: %d IsDirectory: %d Address: %p\n", subDirEntry->Id, subDirEntry->DataIsDirectory, pointer2);
-					
-					if (subDirEntry->DataIsDirectory){
-						subSubdir = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, pointer2);
-						printf("          Resource Directory: %d entries\n", subSubdir->NumberOfIdEntries + subSubdir->NumberOfNamedEntries);
-						subSubDirEntry = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(subSubdir + 1);
-
-						for (int n = 0; n < subSubdir->NumberOfIdEntries; n++){
-							printf("            Type %d | ", subSubDirEntry->Id);
-							if (subSubDirEntry->DataIsDirectory == 0){
-								printf("Codepage = %d Data begins at %p\n", ((IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, image->image_base + data_dir->VirtualAddress + subSubDirEntry->OffsetToData))->CodePage, ((IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, image->image_base + data_dir->VirtualAddress + subSubDirEntry->OffsetToData))->OffsetToData);
-							}
-
-							subSubDirEntry++;
-						}
-					}
-					
-					subDirEntry++;
-				}
-			}
-			else{
-				printf("data at %p\n", pointer);
-			}
-
-			dirEntry++;
-		}
-	}
 
 	//parse exception directory
 	//parse security directory
@@ -2013,7 +2085,10 @@ int main(int argc, char* argv[])
 	LOADED_PE_IMAGE hello = load_pe_executable(argv[1], &CPU);
 	log_instructions = 0;
 
-	while (1){
+	memset(registered_window_classes, 0, sizeof(registered_window_classes));
+	add_window(0, 0);
+
+	while (1) {
 		debug_step(&CPU);
 	}
 
