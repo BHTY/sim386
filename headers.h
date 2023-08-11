@@ -48,6 +48,11 @@ typedef struct{
 	IMPORT_TABLE* import_table;
 	EXPORTED_FUNCTION *export_table;
 	uint32_t resource_offset;
+
+	uint32_t stack_commit;
+	uint32_t stack_reserve;
+	uint32_t heap_commit;
+	uint32_t heap_reserve;
 } LOADED_PE_IMAGE;
 
 typedef struct LOADED_IMAGE{

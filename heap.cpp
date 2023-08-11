@@ -1,7 +1,7 @@
-#include "heap.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "heap.h"
 
 HEAP heap_list[NUM_HEAP];
 
@@ -46,7 +46,7 @@ uint32_t alloc_heap(i386* cpu, uint32_t initial_size, uint32_t max_size){
 		pages_to_reserve++;
 	}
 
-	pages_to_commit+=2;
+	pages_to_commit+=3;
 
 	heap_list[heap_handle].reserved_pages = pages_to_reserve;
 	heap_list[heap_handle].committed_pages = pages_to_commit;
@@ -56,7 +56,7 @@ uint32_t alloc_heap(i386* cpu, uint32_t initial_size, uint32_t max_size){
 	reserve_address_space(cpu, starting_address, pages_to_reserve);
 	heap_list[heap_handle].starting_address = starting_address;
 
-	printf("\n  Allocating %d bytes of address space from %p and mapping %d pages\n", pages_to_reserve * 0x1000, starting_address, pages_to_commit);
+	printf("\n  [HEAP] Allocating %d bytes of address space from %p and mapping %d pages\n", pages_to_reserve * 0x1000, starting_address, pages_to_commit);
 
 	//allocate the requested number of pages and map them in
 	temp_ptr = (uint8_t*)malloc(pages_to_commit * 0x1000);
@@ -139,3 +139,4 @@ uint32_t heap_alloc(i386* cpu, uint32_t handle, uint32_t size){
 
 	return addr + 16;
 }
+

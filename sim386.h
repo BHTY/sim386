@@ -2,11 +2,13 @@
 
 #include <stdint.h>
 
+//#define HEADLESS
+
 #ifdef HEADLESS
 #define printf(...)
 #endif
 
-#define ALIGN(x, val)	(((x % val) == 0) ? val : (x + val) - x % val)
+#define ALIGN(x, val)		(((x % val) == 0) ? x : (x + val) - x % val)
 
 #define STACK_BASE 0x4000000
 

@@ -8,6 +8,10 @@
 
 */
 
+
+
+#undef UNICODE
+
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,7 +28,8 @@ WINDOW_CLASS* window_classes;
 uint32_t escape_addr;
 i386* global_cpu;
 
-uint32_t Address_EnvironmentStrings = 0;
+uint32_t Address_EnvironmentStringsA = 0;
+uint32_t Address_EnvironmentStringsW = 0;
 uint32_t Address_CommandLine = 0;
 
 uint32_t lookup_classname(char* class_name){ //returns a pointer to the WndProc
@@ -185,6 +190,13 @@ uint32_t thunk_ExitProcess(i386* cpu){
 
 	printf("\nCalling ExitProcess(%08x)", uExitCode);
 
+#ifndef HEADLESS
+	cpu->running = 0;
+	printf("\nThe process has been halted, but all of its handles are still active, its memory allocated, and its threads merely paused. To fully close the program, press e at the debug prompt.");
+#else
+	ExitProcess(uExitCode);
+#endif
+
 	return 0;
 }
 
@@ -259,7 +271,7 @@ uint32_t thunk_RegisterClassA(i386* cpu){
 		register_window_class((char*)wc->lpszClassName, (uint32_t)wc->lpfnWndProc);
 	}
 
-	if (wc->lpszMenuName){
+	if (wc->lpszMenuName){ //this can also be an integer
 		wc->lpszMenuName = (LPSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszMenuName);
 	}
 
@@ -530,7 +542,7 @@ uint32_t thunk_HeapAlloc(i386* cpu){
 	printf("\nCalling HeapAlloc(%p, %p, %p)", hHeap, dwFlags, dwBytes);
 	uint32_t pointer = heap_alloc(cpu, hHeap, dwBytes);
 
-	if (1 || (dwFlags & HEAP_ZERO_MEMORY)){
+	if (pointer && (1 || (dwFlags & HEAP_ZERO_MEMORY))){
 		memset(virtual_to_physical_addr(cpu, pointer), 0, dwBytes);
 		printf(" (zeroing memory)");
 	}
@@ -580,6 +592,18 @@ uint32_t thunk_GetCPInfo(i386* cpu){
 	return (uint32_t)GetCPInfo((UINT)CodePage, (LPCPINFO)_lpCPInfo);
 }
 
+uint32_t length_EnvironmentStringsA(LPCH env){ //returns length in pages
+	int i = 0;
+	WORD* ptr = (WORD*)env;
+
+	while (*ptr){
+		ptr++;
+		i += 2;
+	}
+
+	return ALIGN(i, 4096) / 4096;
+}
+
 uint32_t length_EnvironmentStringsW(LPWCH env){ //returns length in pages
 	int i = 0;
 	DWORD* ptr = (DWORD*)env;
@@ -598,16 +622,16 @@ uint32_t thunk_GetEnvironmentStringsW(i386* cpu){
 	uint32_t value;
 	uint32_t length;
 	
-	if (Address_EnvironmentStrings == 0){
+	if (Address_EnvironmentStringsW == 0){
 		env = GetEnvironmentStringsW();
 		length = length_EnvironmentStringsW(env);
 		value = scan_free_address_space(cpu, length, 0x1);
 		map_section(cpu, value, (uint8_t*)env, length * 0x1000);
 		reserve_address_space(cpu, value, length);
-		Address_EnvironmentStrings = value;
+		Address_EnvironmentStringsW = value;
 	}
 	printf("\nCalling GetEnvironmentStringsW()");
-	return Address_EnvironmentStrings;
+	return Address_EnvironmentStringsW;
 }
 
 uint32_t thunk_FreeEnvironmentStringsW(i386* cpu){
@@ -668,6 +692,7 @@ uint32_t thunk_WriteFile(i386* cpu){
 		_lpOverlapped = (LPOVERLAPPED)virtual_to_physical_addr(cpu, lpOverlapped);
 	}
 	printf("\nCalling WriteFile(%p, %p, %p, %p, %p)", hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
+
 	return (uint32_t)WriteFile((HANDLE)hFile, (LPCVOID)_lpBuffer, (DWORD)nNumberOfBytesToWrite, (LPDWORD)_lpNumberOfBytesWritten, (LPOVERLAPPED)_lpOverlapped);
 }
 
@@ -699,6 +724,7 @@ uint32_t thunk_LoadStringA(i386* cpu){
 	uint32_t cchBufferMax = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
 	LPSTR _lpBuffer = (LPSTR)virtual_to_physical_addr(cpu, lpBuffer);
 	*_lpBuffer = 0;
+
 	printf("\nCalling LoadStringA(%p, %p, %p, %p)", hInstance, uID, lpBuffer, cchBufferMax);
 	return 0;
 }
@@ -910,15 +936,182 @@ uint32_t thunk_Ellipse(i386* cpu){
 	return (uint32_t)Ellipse((HDC)hdc, (int)left, (int)top, (int)right, (int)bottom);
 }
 
-uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA,
-									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA,
-									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint,
-									   thunk_GetSystemMetrics, thunk_TranslateAcceleratorA, thunk_GetDC, thunk_ReleaseDC, thunk_SetPixel, thunk_InvalidateRect, thunk_HeapAlloc, thunk_HeapCreate,
-									   thunk_GetStdHandle, thunk_GetFileType, thunk_SetHandleCount, thunk_GetACP, thunk_GetCPInfo, thunk_GetEnvironmentStringsW, thunk_FreeEnvironmentStringsW, thunk_WideCharToMultiByte,
-									   thunk_GetModuleFileNameA, thunk_WriteFile, thunk_HeapFree, thunk_GetDeviceCaps, thunk_CreateSolidBrush, thunk_LoadStringA, thunk_GetTextMetricsA, thunk_SelectObject, 
-									   thunk_PatBlt, thunk_SetWindowTextA, thunk_GetMenu, thunk_CheckMenuItem, thunk_SetCursorPos, thunk_ClientToScreen, thunk_LineTo, thunk_MoveToEx,
-									   thunk_TextOutA, thunk_GetTextExtentPointA, thunk_DeleteObject, thunk_SetCapture, thunk_ReleaseCapture, thunk_ShowCursor, thunk_SetCursor, thunk_SetFocus,
-									   thunk_PostMessageA, thunk_EnableMenuItem, thunk_IsIconic, thunk_GetKeyState, thunk_SetTimer, thunk_KillTimer, thunk_Ellipse, 0};
+uint32_t thunk_ShellAboutA(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t szApp = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t szOtherStuff = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t hIcon = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	LPCSTR _szApp = (LPCSTR)virtual_to_physical_addr(cpu, szApp);
+	LPCSTR _szOtherStuff = 0;
+	if (szOtherStuff){
+		_szOtherStuff = (LPCSTR)virtual_to_physical_addr(cpu, szOtherStuff);
+	}
+	printf("\nCalling ShellAboutA(%p, %p, %p, %p)", hWnd, szApp, szOtherStuff, hIcon);
+	return (uint32_t)ShellAboutA((HWND)hWnd, (LPCSTR)_szApp, (LPCSTR)_szOtherStuff, (HICON)hIcon);
+}
+
+uint32_t thunk_GetWindowDC(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling GetWindowDC(%p)", hWnd);
+	return (uint32_t)GetWindowDC((HWND)hWnd);
+}
+
+uint32_t thunk_SendMessageA(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t Msg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t wParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	printf("\nCalling SendMessageA(%p, %p, %p, %p)", hWnd, Msg, wParam, lParam);
+	return (uint32_t)SendMessageA((HWND)hWnd, (UINT)Msg, (WPARAM)wParam, (LPARAM)lParam);
+}
+
+uint32_t thunk_GetDlgItem(i386* cpu){
+	uint32_t hDlg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t nIDDlgItem = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	printf("\nCalling GetDlgItem(%p, %p)", hDlg, nIDDlgItem);
+	return (uint32_t)GetDlgItem((HWND)hDlg, (int)nIDDlgItem);
+}
+
+uint32_t thunk_GetDlgItemInt(i386* cpu){
+	uint32_t hDlg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t nIDDlgItem = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t lpTranslated = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t bSigned = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	BOOL * _lpTranslated = 0;
+	if (lpTranslated){
+		_lpTranslated = (BOOL *)virtual_to_physical_addr(cpu, lpTranslated);
+	}
+	printf("\nCalling GetDlgItemInt(%p, %p, %p, %p)", hDlg, nIDDlgItem, lpTranslated, bSigned);
+	return (uint32_t)GetDlgItemInt((HWND)hDlg, (int)nIDDlgItem, (BOOL *)_lpTranslated, (BOOL)bSigned);
+}
+
+uint32_t thunk_DrawMenuBar(i386* cpu){
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling DrawMenuBar(%p)", hWnd);
+	return (uint32_t)DrawMenuBar((HWND)hWnd);
+}
+
+uint32_t thunk_GetEnvironmentStringsA(i386* cpu){
+	//map environment variables into RAM
+	LPCH env;
+	uint32_t value;
+	uint32_t length;
+
+	if (Address_EnvironmentStringsA == 0){
+		env = GetEnvironmentStringsA();
+		length = length_EnvironmentStringsA(env);
+		value = scan_free_address_space(cpu, length, 0x1);
+		map_section(cpu, value, (uint8_t*)env, length * 0x1000);
+		reserve_address_space(cpu, value, length);
+		Address_EnvironmentStringsA = value;
+	}
+	printf("\nCalling GetEnvironmentStringsA()");
+	return Address_EnvironmentStringsA;
+}
+
+uint32_t thunk_CreateICA(i386* cpu){
+	uint32_t pszDriver = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t pszDevice = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t pszPort = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t pdm = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	LPCSTR _pszDriver = 0;
+	if (pszDriver){
+		_pszDriver = (LPCSTR)virtual_to_physical_addr(cpu, pszDriver);
+	}
+	LPCSTR _pszDevice = 0;
+	if (pszDevice){
+		_pszDevice = (LPCSTR)virtual_to_physical_addr(cpu, pszDevice);
+	}
+	LPCSTR _pszPort = 0;
+	if (pszPort){
+		_pszPort = (LPCSTR)virtual_to_physical_addr(cpu, pszPort);
+	}
+	CONST DEVMODEA * _pdm = 0;
+	if (pdm){
+		_pdm = (CONST DEVMODEA *)virtual_to_physical_addr(cpu, pdm);
+	}
+	printf("\nCalling CreateICA(%p, %p, %p, %p)", pszDriver, pszDevice, pszPort, pdm);
+	return (uint32_t)CreateICA((LPCSTR)_pszDriver, (LPCSTR)_pszDevice, (LPCSTR)_pszPort, (CONST DEVMODEA *)_pdm);
+}
+
+uint32_t thunk_StretchBlt(i386* cpu){
+	uint32_t hdcDest = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t xDest = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t yDest = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t wDest = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t hDest = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	uint32_t hdcSrc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 24);
+	uint32_t xSrc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 28);
+	uint32_t ySrc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 32);
+	uint32_t wSrc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 36);
+	uint32_t hSrc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 40);
+	uint32_t rop = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 44);
+	printf("\nCalling StretchBlt(%p, %p, %p, %p, %p, %p, %p, %p, %p, %p, %p)", hdcDest, xDest, yDest, wDest, hDest, hdcSrc, xSrc, ySrc, wSrc, hSrc, rop);
+	return (uint32_t)StretchBlt((HDC)hdcDest, (int)xDest, (int)yDest, (int)wDest, (int)hDest, (HDC)hdcSrc, (int)xSrc, (int)ySrc, (int)wSrc, (int)hSrc, (DWORD)rop);
+}
+
+uint32_t thunk_GetPixel(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t x = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t y = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	printf("\nCalling GetPixel(%p, %p, %p)", hdc, x, y);
+	return (uint32_t)GetPixel((HDC)hdc, (int)x, (int)y);
+}
+
+uint32_t thunk_BitBlt(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t x = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t y = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t cx = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t cy = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	uint32_t hdcSrc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 24);
+	uint32_t x1 = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 28);
+	uint32_t y1 = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 32);
+	uint32_t rop = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 36);
+	printf("\nCalling BitBlt(%p, %p, %p, %p, %p, %p, %p, %p, %p)", hdc, x, y, cx, cy, hdcSrc, x1, y1, rop);
+	return (uint32_t)BitBlt((HDC)hdc, (int)x, (int)y, (int)cx, (int)cy, (HDC)hdcSrc, (int)x1, (int)y1, (DWORD)rop);
+}
+
+uint32_t thunk_CreateCompatibleDC(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling CreateCompatibleDC(%p)", hdc);
+	return (uint32_t)CreateCompatibleDC((HDC)hdc);
+}
+
+uint32_t thunk_CreateCompatibleBitmap(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t cx = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t cy = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	printf("\nCalling CreateCompatibleBitmap(%p, %p, %p)", hdc, cx, cy);
+	return (uint32_t)CreateCompatibleBitmap((HDC)hdc, (int)cx, (int)cy);
+}
+
+uint32_t thunk_CreatePen(i386* cpu){
+	uint32_t iStyle = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t cWidth = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t color = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	printf("\nCalling CreatePen(%p, %p, %p)", iStyle, cWidth, color);
+	return (uint32_t)CreatePen((int)iStyle, (int)cWidth, (COLORREF)color);
+}
+
+uint32_t thunk_DeleteDC(i386* cpu){
+	uint32_t hdc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	printf("\nCalling DeleteDC(%p)", hdc);
+	return (uint32_t)DeleteDC((HDC)hdc);
+}
+
+uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA, //0x00 - 0x07
+									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA, //0x08 - 0x0F
+									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint, //0x10 - 0x17
+									   thunk_GetSystemMetrics, thunk_TranslateAcceleratorA, thunk_GetDC, thunk_ReleaseDC, thunk_SetPixel, thunk_InvalidateRect, thunk_HeapAlloc, thunk_HeapCreate, //0x18 - 0x1F
+									   thunk_GetStdHandle, thunk_GetFileType, thunk_SetHandleCount, thunk_GetACP, thunk_GetCPInfo, thunk_GetEnvironmentStringsW, thunk_FreeEnvironmentStringsW, thunk_WideCharToMultiByte, //0x20 - 0x27
+									   thunk_GetModuleFileNameA, thunk_WriteFile, thunk_HeapFree, thunk_GetDeviceCaps, thunk_CreateSolidBrush, thunk_LoadStringA, thunk_GetTextMetricsA, thunk_SelectObject, //0x28 - 0x2F
+									   thunk_PatBlt, thunk_SetWindowTextA, thunk_GetMenu, thunk_CheckMenuItem, thunk_SetCursorPos, thunk_ClientToScreen, thunk_LineTo, thunk_MoveToEx, //0x30 - 0x37
+									   thunk_TextOutA, thunk_GetTextExtentPointA, thunk_DeleteObject, thunk_SetCapture, thunk_ReleaseCapture, thunk_ShowCursor, thunk_SetCursor, thunk_SetFocus, //0x38 - 0x3F
+									   thunk_PostMessageA, thunk_EnableMenuItem, thunk_IsIconic, thunk_GetKeyState, thunk_SetTimer, thunk_KillTimer, thunk_Ellipse, thunk_ShellAboutA, //0x40 - 0x47
+									   thunk_GetWindowDC, thunk_SendMessageA, thunk_GetDlgItem, thunk_GetDlgItemInt, thunk_DrawMenuBar, thunk_GetEnvironmentStringsA, thunk_CreateICA, thunk_StretchBlt, //0x48 - 0x4F
+									   thunk_GetPixel, thunk_BitBlt, thunk_CreateCompatibleDC, thunk_CreateCompatibleBitmap, thunk_CreatePen, thunk_DeleteDC, 0, 0, //0x50 - 0x57
+									   0, 0, 0, 0, 0, 0, 0, 0};
 
 void handle_syscall(i386* cpu){
 	int function_id = cpu->eax;
@@ -1006,12 +1199,16 @@ void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
 	}
 
 	image->entry_point = optional_header->AddressOfEntryPoint + image->image_base;
+	image->stack_commit = optional_header->SizeOfStackCommit;
+	image->stack_reserve = optional_header->SizeOfStackReserve;
+	image->heap_commit = optional_header->SizeOfHeapCommit;
+	image->heap_reserve = optional_header->SizeOfHeapReserve;
 	
 	printf("  Image Base: %p\n", image->image_base);
 	printf("  Entry Point: %p\n", image->entry_point);
-	printf("  Stack Size: %d bytes committed (%d reserved)\n", optional_header->SizeOfStackCommit, optional_header->SizeOfStackReserve);
-	printf("  Heap Size: %d bytes committed (%d reserved)\n", optional_header->SizeOfHeapCommit, optional_header->SizeOfHeapReserve);
-	printf("  Total Size: %d bytes\n", optional_header->SizeOfImage);
+	printf("  Stack Size: %d bytes committed (%d reserved)\n", image->stack_commit, image->stack_reserve);
+	printf("  Heap Size: %d bytes committed (%d reserved)\n", image->heap_commit, image->heap_reserve);
+	printf("  Total Size: %d bytes (section alignment %d bytes, file alignment %d bytes)\n", optional_header->SizeOfImage, optional_header->SectionAlignment, optional_header->FileAlignment);
 
 	//allocate a stack if none exists
 	uint32_t stack_pde = GET_PDE(STACK_BASE - 0x1000);
@@ -1026,6 +1223,14 @@ void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
 		virtual_mmap(cpu, STACK_BASE - 0x1000, (uint8_t*)malloc(0x1000));
 		virtual_mmap(cpu, STACK_BASE, (uint8_t*)malloc(0x1000));
 	}
+}
+
+void parse_id(LOADED_PE_IMAGE* image, IMAGE_IMPORT_DESCRIPTOR* import_desc, BYTE* address_base, i386* cpu);
+
+void parse_rsdir_entry();
+
+void parse_rsdir(i386* cpu, int num_spaces, uint32_t addr_base, uint32_t addr_rsdir){
+
 }
 
 void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
@@ -1064,16 +1269,69 @@ void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
 	}
 
 	//parse import directory -- this one's important
+	data_dir = &(optional_header->DataDirectory[1]);
+	BYTE* address_base;
+	IMAGE_IMPORT_DESCRIPTOR* import_desc;
+	uint32_t section_virtual_addr;
+
+	if (data_dir->Size != 0){
+		section_virtual_addr = data_dir->VirtualAddress & 0xfffff000;
+		printf("  Import Table Size: %d bytes (%p) Section %p\n", data_dir->Size, data_dir->VirtualAddress, section_virtual_addr);
+		//import_desc = (IMAGE_IMPORT_DESCRIPTOR*)virtual_to_physical_addr(cpu, data_dir->VirtualAddress + image->image_base);
+		/*address_base = (BYTE*)import_desc - section_virtual_addr;
+		parse_id(image, import_desc, address_base, cpu);*/
+	}	
+
+	/*IMAGE_IMPORT_DIRECTORY* imageImportDirectory;
+	data_dir = &(optional_header->DataDirectory[1]);*/
 	
 	//parse resource directory
 	data_dir = &(optional_header->DataDirectory[2]);
 	IMAGE_RESOURCE_DIRECTORY* imageResourceDirectory;
+	IMAGE_RESOURCE_DIRECTORY_ENTRY* dirEntry;
+	IMAGE_RESOURCE_DIRECTORY* subdir;
+	IMAGE_RESOURCE_DIRECTORY_ENTRY* subDirEntry;
+	IMAGE_RESOURCE_DATA_ENTRY* entry;
+	uint32_t pointer;
+
 	int total_entries;
 
 	if (data_dir->Size != 0){
+		printf("%p\n", data_dir->VirtualAddress);
 		imageResourceDirectory = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, data_dir->VirtualAddress + image->image_base);
 		total_entries = imageResourceDirectory->NumberOfNamedEntries + imageResourceDirectory->NumberOfIdEntries;
 		printf("  Resource Directory: %d bytes (%d entries)\n", data_dir->Size, total_entries);
+
+		dirEntry = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)((uint8_t*)imageResourceDirectory + sizeof(IMAGE_RESOURCE_DIRECTORY));
+
+		for (int i = 0; i < imageResourceDirectory->NumberOfNamedEntries; i++){
+			printf("    abc\n");
+			dirEntry++;
+		}
+
+		for (int i = 0; i < imageResourceDirectory->NumberOfIdEntries; i++){
+			printf("    Directory Entry ID: %d points to ", dirEntry->Id);
+			pointer = image->image_base + data_dir->VirtualAddress + (dirEntry->OffsetToDirectory & 0x7FFFFFFF);
+			if (dirEntry->DataIsDirectory){
+				printf("directory at %p\n", pointer);
+				subdir = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, pointer);
+				printf("      Resource Directory: %d entries\n", subdir->NumberOfIdEntries + subdir->NumberOfNamedEntries);
+				subDirEntry = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(subdir + 1);
+				for (int p = 0; p < subdir->NumberOfNamedEntries; p++){
+					printf("        Name: %p IsDirectory: %d\n", image->image_base + data_dir->VirtualAddress + subDirEntry->NameOffset, subDirEntry->DataIsDirectory);
+					subDirEntry++;
+				}
+				for (int p = 0; p < subdir->NumberOfIdEntries; p++){
+					printf("        ID: %d IsDirectory: %d Address: %p\n", subDirEntry->Id, subDirEntry->DataIsDirectory, image->image_base + data_dir->VirtualAddress + subDirEntry->OffsetToDirectory);
+					subDirEntry++;
+				}
+			}
+			else{
+				printf("data at %p\n", pointer);
+			}
+
+			dirEntry++;
+		}
 	}
 
 	//parse exception directory
@@ -1126,12 +1384,41 @@ void parse_ilt(LOADED_PE_IMAGE* image, uint32_t* ilt, uint32_t rva_ilt, BYTE* ad
 	}
 }
 
+void parse_id(LOADED_PE_IMAGE* image, IMAGE_IMPORT_DESCRIPTOR* import_desc, BYTE* address_base, i386* cpu){
+	IMPORT_TABLE* temp;
+	IMAGE_IMPORT_DESCRIPTOR null_desc;
+	memset(&null_desc, 0, sizeof(null_desc));
+
+	while (1){
+		//check if it's zeroed out - if it is, quit the loop
+		if (memcmp(import_desc, &null_desc, sizeof(IMAGE_IMPORT_DESCRIPTOR)) == 0){
+			//printf("    Done parsing IDT\n");
+			break;
+		}
+
+		printf("    %p: IAT RVA = %x, ILT RVA = %x ", import_desc, import_desc->OriginalFirstThunk, import_desc->FirstThunk);
+		printf("Name: %s\n", address_base + import_desc->Name);
+
+		temp = image->import_table;
+		image->import_table = (IMPORT_TABLE*)malloc(sizeof(IMPORT_TABLE));
+		memset(image->import_table, 0, sizeof(IMPORT_TABLE));
+		image->import_table->image_name = address_base + import_desc->Name;
+		image->import_table->next = temp;
+
+		//iterate over IAT & load binaries
+		parse_ilt(image, (uint32_t*)(address_base + import_desc->OriginalFirstThunk), import_desc->FirstThunk, address_base, cpu);
+
+		import_desc++;
+	}
+}
+
 void parse_idt(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu){
 	IMPORT_TABLE* temp;
 	IMAGE_IMPORT_DESCRIPTOR* import_desc = (IMAGE_IMPORT_DESCRIPTOR*)(image->data + sec->PointerToRawData);
 	IMAGE_IMPORT_DESCRIPTOR null_desc;
 	BYTE* address_base = image->data + sec->PointerToRawData - sec->VirtualAddress;
 	memset(&null_desc, 0, sizeof(null_desc));
+	printf("%p\n", sec->PointerToRawData);
 
 	while (1){
 		//check if it's zeroed out - if it is, quit the loop
@@ -1211,6 +1498,10 @@ void parse_text(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu){
 	}
 }
 
+void parse_data(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu){
+	printf("    %d bytes initialized data, %d bytes uninitialized data\n", sec->SizeOfRawData, sec->Misc.VirtualSize - sec->SizeOfRawData);
+}
+
 void parse_section_headers(LOADED_PE_IMAGE* image, i386* cpu){
 	uint8_t* lpSection;
 	uint32_t sectionSize;
@@ -1223,6 +1514,14 @@ void parse_section_headers(LOADED_PE_IMAGE* image, i386* cpu){
 		printf("  Section %s\n", current_section.Name);
 		printf("    Physical Address: %p Virtual Address %p Size: %d %d\n", current_section.PointerToRawData, current_section.VirtualAddress, current_section.SizeOfRawData, current_section.Misc.VirtualSize);
 
+		if (current_section.Misc.VirtualSize > current_section.SizeOfRawData){
+			sectionSize = ALIGN(current_section.Misc.VirtualSize, 4096);
+		}
+		else{
+			sectionSize = ALIGN(current_section.SizeOfRawData, 4096);
+		}
+		lpSection = (uint8_t*)malloc(sectionSize);
+
 		if (strcmp((const char*)current_section.Name, ".text") == 0){
 			parse_text(image, &current_section, cpu);
 		} else if(strcmp((const char*)current_section.Name, ".idata") == 0){
@@ -1230,19 +1529,16 @@ void parse_section_headers(LOADED_PE_IMAGE* image, i386* cpu){
 		} else if (strcmp((const char*)current_section.Name, ".reloc") == 0){
 			parse_rt(image, &current_section, cpu);
 		} else if (strcmp((const char*)current_section.Name, ".data") == 0){
-			//map_section(cpu, current_section.VirtualAddress + image->image_base, image->data + current_section.PointerToRawData, 12288);
-			//memset(image->data + current_section.PointerToRawData, 0, current_section.SizeOfRawData);
-			//*(uint32_t*)virtual_to_physical_addr(cpu, 0x4099c4) = 0x0;
+			parse_data(image, &current_section, cpu);
 		}else if (strcmp((const char*)current_section.Name, ".rsrc") == 0){
 			image->resource_offset = current_section.VirtualAddress;
 		}
+		else if (strcmp((const char*)current_section.Name, ".bss") == 0){
+			current_section.SizeOfRawData = 0;
+		}
 
-		sectionSize = ALIGN(current_section.Misc.VirtualSize, 4096);
-		lpSection = (uint8_t*)malloc(sectionSize);
 		memset(lpSection, 0, sectionSize); //zero it out
 		memcpy(lpSection, image->data + current_section.PointerToRawData, current_section.SizeOfRawData);
-
-		//map_section(cpu, current_section.VirtualAddress + image->image_base, image->data + current_section.PointerToRawData, current_section.SizeOfRawData);
 		map_section(cpu, current_section.VirtualAddress + image->image_base, lpSection, sectionSize);
 	}
 }
@@ -1270,6 +1566,8 @@ void print_export_table(LOADED_PE_IMAGE* image, i386* cpu){
 }
 
 uint32_t scan_export_table_for_name(EXPORTED_FUNCTION* export_table, i386* cpu, char* name){
+	uint32_t addr;
+
 	while (export_table){
 		if (strcmp(name, (const char*)virtual_to_physical_addr(cpu, export_table->name)) == 0){
 			return export_table->address;
@@ -1277,6 +1575,8 @@ uint32_t scan_export_table_for_name(EXPORTED_FUNCTION* export_table, i386* cpu, 
 
 		export_table = export_table->next;
 	}
+
+	return 0;
 }
 
 uint32_t scan_export_table_for_ordinal(EXPORTED_FUNCTION* export_table, WORD ordinal){
@@ -1338,7 +1638,12 @@ void resolve_imports(LOADED_PE_IMAGE* image, i386* cpu){
 				addr = scan_export_table_for_ordinal(cur_image->export_table, function->ordinal);
 			}
 
-			printf(" (resolved to address %p)\n", addr);
+			if (addr){
+				printf(" (resolved to address %p)\n", addr);
+			}
+			else{
+				printf(" (UNRESOLVED EXPORT)\n");
+			}
 
 			*(uint32_t*)(virtual_to_physical_addr(cpu, image->image_base + function->address)) = addr;
 
@@ -1552,6 +1857,26 @@ uint32_t debug_step(i386* cpu){
 
 uint8_t escape_routine[3] = {0xcd, 0xff, 0xc3};
 
+LOADED_PE_IMAGE load_pe_executable(char* filename, i386* cpu){
+	LOADED_PE_IMAGE image = load_pe_file(filename);
+	parse_headers(&image, cpu);
+	cpu->running = 0;
+	cpu->single_step = 1;
+	cpu->eip = image.entry_point;
+
+	//map the escape routine into ram
+	escape_addr = 0xFFFF0000;
+	global_cpu = cpu;
+	virtual_mmap(cpu, escape_addr, escape_routine);
+	reserve_address_space(cpu, 0x00000000, 0x400);
+
+	//allocate the heap
+	heap_init();
+	//alloc_heap(cpu, image.heap_commit, image.heap_reserve); //put it in the PEB
+
+	return image;
+}
+
 int main(int argc, char* argv[])
 {
 	FILE* fp;
@@ -1565,20 +1890,8 @@ int main(int argc, char* argv[])
 
 	i386 CPU;
 	cpu_init(&CPU);
-	//LOADED_PE_IMAGE hello = load_pe_file("C:\\Users\\Will\\peldr\\hellowin.exe");
-	LOADED_PE_IMAGE hello = load_pe_file(argv[1]);
-	parse_headers(&hello, &CPU);
-	CPU.running = 0;
-	CPU.single_step = 1;
-	CPU.eip = hello.entry_point;
 
-	//map the escape routine into RAM somewhere
-	escape_addr = 0xFFFF0000;
-	global_cpu = &CPU;
-	virtual_mmap(&CPU, escape_addr, escape_routine);
-	reserve_address_space(&CPU, 0x00000000, 0x400);
-
-	heap_init();
+	LOADED_PE_IMAGE hello = load_pe_executable(argv[1], &CPU);
 
 	while (1){
 		debug_step(&CPU);

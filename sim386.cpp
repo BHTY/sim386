@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include "sim386.h"
 
-#define printf(...) 
+//#define printf(...) 
 
 const char* reg_names_8[8] = {"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BH"};
 const char* reg_names_16[8] = {"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI"};
@@ -109,17 +109,12 @@ void alu_idiv32(i386* cpu, int32_t divisor){ //also has to set flags
 	int64_t dividend = (cpu->edx << 32) | cpu->eax;
 	int64_t result = dividend / divisor;
 	int64_t rem = dividend % divisor;
-
+	
 	cpu->eax = result;
 	cpu->edx = rem;
 }
 
 void alu_div32(i386* cpu, uint32_t divisor){ //also has to set flags
-	if (divisor == 0){
-		cpu_dump(cpu);
-		while (1);
-	}
-
 	uint64_t dividend = (cpu->edx << 32) | cpu->eax;
 	uint64_t result = dividend / divisor;
 	uint64_t rem = dividend % divisor;
@@ -130,6 +125,10 @@ void alu_div32(i386* cpu, uint32_t divisor){ //also has to set flags
 
 uint8_t alu_or8(i386* cpu, uint8_t a, uint8_t b){ //also has to set flags
 	uint8_t result = a | b;
+	cpu_clear_flag(cpu, 0); //clear cf
+	cpu_clear_flag(cpu, 11); //clear of
+	cpu_set_zf(cpu, result);
+	cpu_set_sf(cpu, (int32_t)(int8_t)result);
 	return result;
 }
 
@@ -696,6 +695,15 @@ void op_05(i386* cpu){ //ADD EAX, imm32
 	}
 }
 
+void op_0A(i386* cpu){ //OR r8, r/m8
+	get_modrm();
+	cpu->eip += 2;
+	get_modrm_src_reg_8();
+	printf("OR %s, ", reg_names_8[REG(modrm)]);
+	get_modrm_dst_ptr_8(0);
+	cpu_or8(cpu, src_ptr, dst_ptr);
+}
+
 void op_0B(i386* cpu){ //OR r16/32, r/m16/32
 	get_modrm();
 	cpu->eip += 2;
@@ -1252,6 +1260,9 @@ void op_64(i386* cpu){ //FS segment override -- hack to skip over
 		case 0xa1:
 			cpu->eip += 5;
 			break;
+		case 0xa3:
+			cpu->eip += 5;
+			break;
 		default:
 			printf("Unimplemented opcode 0x%02x", next_instruction);
 			cpu->running = 0;
@@ -1501,11 +1512,17 @@ void op_99(i386* cpu){ //CWD/CDQ
 			if (cpu->ax & 0x8000){
 				cpu->dx = 0xFFFF;
 			}
+			else{
+				cpu->dx = 0;
+			}
 			break;
 		case 1:
 			printf("CDQ");
 			if (cpu->eax & 0x80000000){
 				cpu->edx = 0xFFFFFFFF;
+			}
+			else{
+				cpu->edx = 0;
 			}
 			break;
 	}
@@ -2416,7 +2433,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x7
 	0, //0x8
 	0, //0x9
-	0, //0xa
+	op_0A, //0xa
 	op_0B, //0xb
 	op_0C, //0xc
 	0, //0xd
