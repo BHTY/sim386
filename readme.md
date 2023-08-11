@@ -1,16 +1,19 @@
 win32emu To-do List
 - Fix import data directory walking
-- Get FreeCell working (then WinMine, then Doom)
+- Get Reversi working @ 100% -> Get FreeCell working (then WinMine, then Doom)
 - Fix the heap manager
 - ``VirtualAlloc``
 - Shim menu name stuff in RegisterClass by creating a menu and inserting the items by parsing the resource directory when CreateWindow is called
 - Read resource data directory & implement (rather than stub out) associated functions
-  - ``LoadBitmapA``, ``LoadStringA``, ``LoadAcceleratorsA``, ``LoadCursorA``
+  - ``LoadBitmapA``, ``LoadStringA``, ``LoadAcceleratorsA``, ``LoadCursorA``, ``LoadDialogA``, etc.
+    - Still not sure how the resource directory will be indexed but somehow, a table will map the ``HINSTANCE`` to the relevant resource directory and find the resource
+    - ``LoadStringA`` is a relatively trivial case since all it involves is finding the string data and copying it into the provided buffer (though Unicode->ASCII translation may be in order, at least a buffer was provided by the client)
+    - The other three functions indicated (and many other resource-related functions) return ``HANDLE``s to resources. The thunk layer will need to read the data and create the object in the host's memory space. For example, the thunk for ``LoadAcceleratorsA`` will locate the pointer (in the host's memory space) to the array of ``ACCEL`` structs. It will then call ``CreateAcceleratorTable`` and return the ``HACCEL`` returned by said function
   - The trouble with these is that they get passed an ``HINSTANCE``. To make these work right, I'll need to fix my entire approach to ``HINSTANCE``s
   - Each image loaded by the simulator should have a unique ``HINSTANCE`` (this can just be the image base) recorded in a table in pe_ldr. Whenever an application needs to pass an ``HINSTANCE`` off to Windows (i.e. if it's registering a window class and/or creating a window), assuming the ``HINSTANCE`` is valid, the simulator will pass the ``HINSTANCE`` of the host to the relevant Windows function (right now, it just treats the ``HINSTANCE`` of the exe == the ``HINSTANCE`` of the host which is a problem when DLLs try to do their own thing)
     - Slight tangent on the subject of DLLs doing their own thing: The DLL entry points should be called as soon as they're loaded so that DLLs can save their HINSTANCEs and do whatever other initialization they need to do
     - One function that will need to address this development is ``dummy_WndProc``, which needs to look up the ``HINSTANCE`` (unless the ``CS_GLOBALCLASS`` flag was passed to ``RegisterClass``, which should cause any subsequent calls to ``RegisterClass`` with the same name to fail) as well as the class name (the class name checking should also be modified to support both ANSI and Unicode) - ``dummy_WndProc`` will know its ``HINSTANCE`` because I'll maintain a table of ``HINSTANCE``s to ``HWND``s 
-    - Remember that the way this works is that the ``WNDCLASS`` passed to ``RegisterClass`` contains two identifying items - a classname and an instance handle (along with a pointer to a window procedure). When I call ``CreateWindow``, I pass a classname and an instance handle and get back a window handle. This is when the instance handle, window handle, and window procedure become inextricably linked (until something is freed)
+    - Remember that the way this works is that the ``WNDCLASS`` passed to ``RegisterClass`` contains two identifying items - a classname and an instance handle (along with a pointer to a window procedure). When I call ``CreateWindow``, I pass a classname and an instance handle and get back a window handle. This is when the instance handle, window handle, and window procedure become inextricably linked (until something is freed). (``RegisterClass`` also takes a pointer for the menu name which either is a pointer to a string containing the name of the menu resource, an integer ID of the resource, or a NULL. The thunk layer needs to be able to cope with all three situations.) 
     - Questions
       - What happens if ``CreateWindow`` is passed a NULL hInstance? Is it now global or referring to the current process?
    - When a function like LoadStringA is called, the application will look up the HINSTANCE passed into its table, determine which image is being referenced, and go through the relevant image and find the relevant resource and do whatever it needs to be done
