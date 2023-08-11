@@ -28,12 +28,47 @@ time_t start_time;
 LOADED_IMAGE* loaded_images;
 WINDOW_CLASS* window_classes;
 
+EMU_HINSTANCE* root_instance = 0;
+
 uint32_t escape_addr;
 i386* global_cpu;
 
 uint32_t Address_EnvironmentStringsA = 0;
 uint32_t Address_EnvironmentStringsW = 0;
 uint32_t Address_CommandLine = 0;
+
+EMU_HINSTANCE* find_instance(uint32_t hInstance) {
+	EMU_HINSTANCE* instance = root_instance;
+
+	while (instance) {
+		if (instance->image_base == hInstance) return instance;
+		instance = instance->next;
+	}
+
+	return 0;
+}
+
+void add_instance(uint32_t image_base, uint32_t root_rsdir) {
+	EMU_HINSTANCE* instance = root_instance;
+	EMU_HINSTANCE* prevInstance = root_instance;
+	EMU_HINSTANCE* newInstance = (EMU_HINSTANCE*)malloc(sizeof(EMU_HINSTANCE));
+	newInstance->image_base = image_base;
+	newInstance->root_rsdir = root_rsdir;
+	newInstance->next = 0;
+
+	if (root_instance == 0) {
+		root_instance = newInstance;
+		return;
+	}
+
+	while (instance) {
+		prevInstance = instance;
+		instance = instance->next;
+	}
+
+	prevInstance->next = newInstance;
+	return;
+}
 
 uint32_t lookup_classname(char* class_name){ //returns a pointer to the WndProc
 	WINDOW_CLASS* temp = window_classes;
@@ -1320,6 +1355,8 @@ void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
 	
 	//parse resource directory
 	data_dir = &(optional_header->DataDirectory[2]);
+	add_instance(image->image_base, data_dir->VirtualAddress);
+
 	IMAGE_RESOURCE_DIRECTORY* imageResourceDirectory;
 	IMAGE_RESOURCE_DIRECTORY_ENTRY* dirEntry;
 	IMAGE_RESOURCE_DIRECTORY* subdir;
