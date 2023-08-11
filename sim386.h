@@ -2,8 +2,8 @@
 
 #include <stdint.h>
 
-//#define HEADLESS
-//#define NO_DEBUGGER
+#define HEADLESS
+#define NO_DEBUGGER
 
 #ifdef HEADLESS
 #define printf(...)

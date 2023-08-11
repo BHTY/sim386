@@ -61,9 +61,118 @@ typedef struct LOADED_IMAGE{
 	struct LOADED_IMAGE* next;
 } LOADED_IMAGE;
 
+//this is getting deprecated!
 typedef struct WINDOW_CLASS{
 	uint32_t WndProc;
 	uint32_t TimerProc;
 	char class_name[100];
 	struct WINDOW_CLASS* next;
 } WINDOW_CLASS;
+
+typedef struct EMU_HINSTANCE{
+	uint32_t image_base; //contains the actual HINSTANCE (GetModuleHandle(NULL) always returns the HINSTANCE of the root - DLL entry points are passed their HINSTANCE)
+	uint32_t root_rsdir;
+	struct EMU_HINSTANCE* next;
+} EMU_HINSTANCE;
+
+typedef struct REGISTERED_WINDOW_CLASS { //this one is stored in a flat array, not a linked list
+	uint16_t wndclass;
+	EMU_HINSTANCE* hInstance;
+	HMENU hMenu;
+	uint32_t wndproc;
+	char* class_name;
+	int global;
+} REGISTERED_WINDOW_CLASS;
+
+typedef struct ACTIVE_WINDOW {
+	uint32_t hwnd;
+	uint16_t wndclass;
+	struct ACTIVE_WINDOW* next;
+	struct WINDOW_TIMER* timers;
+} ACTIVE_WINDOW;
+
+typedef struct WINDOW_TIMER {
+	uint16_t timerID;
+	uint32_t TimerProc;
+	struct WINDOW_TIMER* next;
+} WINDOW_TIMER;
+
+
+/* 
+The (mostly linked) lists I'll need
+- Currently loaded images
+	Each entry will contain the HINSTANCE (image base) and a pointer to the root resource directory
+- Registered window classes (most of the variables aren't important but a few are)
+    Each entry will contain the atom returned by RegisterClass, a pointer to an EMU_HINSTANCE structure, menu handle, window procedure, class name, and a flag indicating whether it's global or not
+- Active windows
+	Each entry will contain the actual Win32 HWND of the window, pointer to a REGISTERED_WINDOW_CLASS struct, and a pointer to a linked list of TIMER structs
+- Timers
+	Each entry contains a timer ID and a pointer to a TimerProc
+
+On process startup, the root of the WINDOW list will have an HWND of 0 (i.e. the desktop window) for purpose of SetTimer but more windows can be added
+
+I can usually assume that an application will call RegisterClass(Ex)A + CreateWindow(Ex)A or RegisterClass(Ex)W + CreateWindow(Ex)W so I should not
+need to deal with Unicode<->ANSI conversion for the most part.
+
+Order of business
+1.) Fix the way that HINSTANCEs work
+2.) Fix the way that windows work (including timers and all that nonsense)
+3.) Implement resources -> get Reversi working @ 100%
+	Reversi requires LoadString, LoadCursor, LoadIcon, LoadAccelerators, and has a menu in the window class
+4.) Implement import directory parsing -> get FreeCell working
+5.) Rearchitect the directory structure of both this PC and the repo to both make sense and mirror each other
+
+FindResourceA/W will be implemented using a thunk, but the LoadString/LoadBitmap/LoadXXX functions will be implemented in C code inside of KERNEL32.dll
+
+WINAPI HBITMAP LoadBitmapA(HINSTANCE hInstance, LPCSTR lpBitmapName){
+	HRSRC hRsrc = FindResourceA(hInstance, lpBitmapName, RT_BITMAP);
+
+	if(hRsrc == 0) return (HBITMAP)0;
+
+	rsrc = LoadResource(hInstance, hRsrc);
+	pBmp = LockResource(rsrc);
+	return CreateBitmap(pBmp->bmWidth, pBmp->bmHeight, pBmp->bmPlanes, pBmp->bmBitsPixel, pBmp->bmBits);
+}
+
+Looking at this function, the only two functions that are actually thunked are FindResourceA and CreateBitmap
+FindResourceA in this implementation returns a pointer to the resource data entry corresponding to the requested resource
+	LoadResource just returns ((IMAGE_RESOURCE_DATA_ENTRY*)hRsrc)->OffsetToData    (i.e. the pointer to the actual bits)
+	LockResource is essentially a no-op
+CreateBitmap then takes the data passed and creates a HBITMAP in the context of the host and passes it back
+	The only "conversion" CreateBitmap has to do is converting lpBits to a host-memory pointer
+
+There's a find_resource() function on the host-side, called by the FindResourceA thunk. find_resource() takes the following parameters
+- Pointer to the root resource data directory
+	This is just the sum of the EMU_HINSTANCE fields image_base and root_rsdir
+- The resource type name or ID
+- The resource name or ID
+- A flag indicating whether the search is by name or by ID
+- A flag indicating whether the resource type is by name or by ID
+
+find_resource() has to handle Unicode<->ANSI conversion for names
+find_resource() returns a pointer (in the virtual memory space of the simulated CPU) to the directory entry that points to the resource
+
+
+
+Creating a window
+Step 1.) Call RegisterClass
+	Most of the elements of the WNDCLASS structure are left unmodified but a few are "tweaked" before the thunker calls RegisterClass on the host
+		The HINSTANCE is substituted for GetModuleHandle(NULL), the window procedure is replaced with dummy_WndProc, the menu name / ID is zeroed out
+	The class name is converted into the host's memory space before RegisterClass is called by the thunker
+	A few variables are cached in the window class table
+		A pointer to the EMU_HINSTANCE for the instance handle, a copy of the class name, the global flag, and window procedure pointer
+	If the menu name is non-NULL, a menu will be created on the host using CreateMenu(), reading the menu resource from the desired HINSTANCE
+		The HMENU generated by this is stored into the window class table entry
+	If CS_GLOBALCLASS is set, any further attempts to create a class with that name will fail
+	The index into the win32emu's window class table is returned while the atom returned by windows is stored inside of the window class table entry
+Step 2.) Call CreateWindow
+	Most of the arguments passed to CreateWindow are left unmodified, but a few parameters are tweaked
+		lpClassName - If non-NULL and an atom, it's an index into the window class table. If it's a string, it's a class name that, combined with the hInstance,
+			refers to a window class. This will be used to find the REGISTERED_WINDOW_CLASS pointer which is stored in the entry for this window into the active
+			window table. Additionally, the atom stored in the REGISTERED_WINDOW_CLASS is passed to lpClassName.
+		lpWindowName - Converted into the host's memory space if non-NULL
+		hMenu - If NULL, it is substituted for the menu handle stored in the REGISTERED_WINDOW_CLASS
+		hInstance - Substituted for the HINSTANCE of the host, but used to find the REGISTERED_WINDOW_CLASS
+		lpParam - NULL (not handled for now)
+	The linked list of TIMER structs is initialized to zero and the Win32 HWND returned by CreateWindow is stored in the active window table
+*/
