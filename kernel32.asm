@@ -209,6 +209,23 @@ LocalFree:
 	leave
 	ret 0x4
 
+global GetEnvironmentStringsA
+extern GetEnvironmentStringsA
+export GetEnvironmentStringsA
+
+GetEnvironmentStringsA:
+	hlt
+	mov eax, THUNK_KERNEL32_GETENVIRONMENTSTRINGSA
+	int SYSCALL_THUNK
+	ret 0x0
+
+global GetEnvironmentStrings
+extern GetEnvironmentStrings
+export GetEnvironmentStrings
+
+GetEnvironmentStrings:
+	jmp GetEnvironmentStringsA
+
 THUNK_KERNEL32_EXITPROCESS equ 0x01
 THUNK_KERNEL32_GETMODULEHANDLEA equ 0x03
 THUNK_KERNEL32_GETCOMMANDLINEA equ 0x0E
@@ -226,4 +243,5 @@ THUNK_KERNEL32_WIDECHARTOMULTIBYTE equ 0x27
 THUNK_KERNEL32_GETMODULEFILENAMEA equ 0x28
 THUNK_KERNEL32_WRITEFILE equ 0x29
 THUNK_KERNEL32_HEAPFREE equ 0x2A
+THUNK_KERNEL32_GETENVIRONMENTSTRINGSA equ 0x4D
 SYSCALL_THUNK equ 0x80

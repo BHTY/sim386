@@ -133,6 +133,78 @@ Ellipse:
 	int SYSCALL_THUNK
 	ret 0x14
 
+global CreateICA
+extern CreateICA
+export CreateICA
+
+CreateICA:
+	mov eax, THUNK_GDI32_CREATEICA
+	int SYSCALL_THUNK
+	ret 0x10
+
+global StretchBlt
+extern StretchBlt
+export StretchBlt
+
+StretchBlt:
+	mov eax, THUNK_GDI32_STRETCHBLT
+	int SYSCALL_THUNK
+	ret 0x2c
+
+global GetPixel
+extern GetPixel
+export GetPixel
+
+GetPixel:
+	mov eax, THUNK_GDI32_GETPIXEL
+	int SYSCALL_THUNK
+	ret 0xc
+
+global BitBlt
+extern BitBlt
+export BitBlt
+
+BitBlt:
+	mov eax, THUNK_GDI32_BITBLT
+	int SYSCALL_THUNK
+	ret 0x24
+
+global CreateCompatibleDC
+extern CreateCompatibleDC
+export CreateCompatibleDC
+
+CreateCompatibleDC:
+	mov eax, THUNK_GDI32_CREATECOMPATIBLEDC
+	int SYSCALL_THUNK
+	ret 0x4
+
+global CreateCompatibleBitmap
+extern CreateCompatibleBitmap
+export CreateCompatibleBitmap
+
+CreateCompatibleBitmap:
+	mov eax, THUNK_GDI32_CREATECOMPATIBLEBITMAP
+	int SYSCALL_THUNK
+	ret 0xc
+
+global CreatePen
+extern CreatePen
+export CreatePen
+
+CreatePen:
+	mov eax, THUNK_GDI32_CREATEPEN
+	int SYSCALL_THUNK
+	ret 0xc
+
+global DeleteDC
+extern DeleteDC
+export DeleteDC
+
+DeleteDC:
+	mov eax, THUNK_GDI32_DELETEDC
+	int SYSCALL_THUNK
+	ret 0x4
+
 THUNK_GDI32_SETBKMODE equ 0x02
 THUNK_GDI32_GETSTOCKOBJECT equ 0x12
 THUNK_GDI32_SETPIXEL equ 0x1C
@@ -147,4 +219,12 @@ THUNK_GDI32_TEXTOUTA equ 0x38
 THUNK_GDI32_GETTEXTEXTENTPOINTA equ 0x39
 THUNK_GDI32_DELETEOBJECT equ 0x3A
 THUNK_GDI32_ELLIPSE equ 0x46
+THUNK_GDI32_CREATEICA equ 0x4E
+THUNK_GDI32_STRETCHBLT equ 0x4F
+THUNK_GDI32_GETPIXEL equ 0x50
+THUNK_GDI32_BITBLT equ 0x51
+THUNK_GDI32_CREATECOMPATIBLEDC equ 0x52
+THUNK_GDI32_CREATECOMPATIBLEBITMAP equ 0x53
+THUNK_GDI32_CREATEPEN equ 0x54
+THUNK_GDI32_DELETEDC equ 0x55
 SYSCALL_THUNK equ 0x80

@@ -374,6 +374,51 @@ KillTimer:
 	mov eax, THUNK_USER32_KILLTIMER
 	int SYSCALL_THUNK
 	ret 0x8
+	
+global GetWindowDC
+extern GetWindowDC
+export GetWindowDC
+
+GetWindowDC:
+	mov eax, THUNK_USER32_GETWINDOWDC
+	int SYSCALL_THUNK
+	ret 0x4
+
+global SendMessageA
+extern SendMessageA
+export SendMessageA
+
+SendMessageA:
+	mov eax, THUNK_USER32_SENDMESSAGEA
+	int SYSCALL_THUNK
+	ret 0x10
+
+global GetDlgItem
+extern GetDlgItem
+export GetDlgItem
+
+GetDlgItem:
+	mov eax, THUNK_USER32_GETDLGITEM
+	int SYSCALL_THUNK
+	ret 0x8
+
+global GetDlgItemInt
+extern GetDlgItemInt
+export GetDlgItemInt
+
+GetDlgItemInt:
+	mov eax, THUNK_USER32_GETDLGITEMINT
+	int SYSCALL_THUNK
+	ret 0x10
+
+global DrawMenuBar
+extern DrawMenuBar
+export DrawMenuBar
+
+DrawMenuBar:
+	mov eax, THUNK_USER32_DRAWMENUBAR
+	int SYSCALL_THUNK
+	ret 0x4
 
 THUNK_USER32_MESSAGEBOXA equ 0x00
 THUNK_USER32_LOADCURSORA equ 0x04
@@ -415,4 +460,9 @@ THUNK_USER32_ISICONIC equ 0x42
 THUNK_USER32_GETKEYSTATE equ 0x43
 THUNK_USER32_SETTIMER equ 0x44
 THUNK_USER32_KILLTIMER equ 0x45
+THUNK_USER32_GETWINDOWDC equ 0x48
+THUNK_USER32_SENDMESSAGEA equ 0x49
+THUNK_USER32_GETDLGITEM equ 0x4A
+THUNK_USER32_GETDLGITEMINT equ 0x4B
+THUNK_USER32_DRAWMENUBAR equ 0x4C
 SYSCALL_THUNK equ 0x80
