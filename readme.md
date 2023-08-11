@@ -1,6 +1,8 @@
 win32emu To-do List
 - Fix import data directory walking
-- Get Reversi working @ 100% -> Get FreeCell working (then WinMine, then Doom)
+- Get more programs working (make sure to try a wide variety of CRTs)
+  - Get Reversi working @ 100%
+  - Get FreeCell working
 - Fix the heap manager
 - ``VirtualAlloc``
 - Shim menu name stuff in RegisterClass by creating a menu and inserting the items by parsing the resource directory when CreateWindow is called
