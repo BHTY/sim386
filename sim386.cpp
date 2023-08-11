@@ -2,8 +2,27 @@
 #include <string.h>
 #include <stdio.h>
 #include "sim386.h"
+#include <stdarg.h>
+#include <windows.h>
+#include <assert.h>
 
-//#define printf(...) 
+int log_instructions = 1;
+
+#ifndef HEADLESS
+#define printf sim_printf
+
+int sim_printf(const char* fmt, ...) {
+	if (log_instructions) {
+		va_list args;
+		int i;
+		va_start(args, fmt);
+		i = vprintf(fmt, args);
+		va_end(args);
+		return i;
+	}
+	return 0;
+}
+#endif     
 
 const char* reg_names_8[8] = {"AL", "CL", "DL", "BL", "AH", "CH", "DH", "BH"};
 const char* reg_names_16[8] = {"AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI"};
@@ -604,13 +623,33 @@ uint32_t calc_modrm_addr(i386* cpu, uint8_t modrm){
 uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr){
 	uint32_t pde = GET_PDE(vaddr);
 	uint32_t pte = GET_PTE(vaddr);
+	uint32_t page_base;
+	int old_log_instructions = log_instructions;
 
-	if (cpu->page_dir.entries[pde] == 0 || cpu->page_dir.entries[pde]->entries[pte] == 0){
+	log_instructions = 1;
+
+	if (cpu->page_dir.entries[pde] == 0){
 		printf("Page fault accessing address %p.\n", vaddr);
 		cpu_dump(cpu);
 		cpu->running = 0;
-		return 0;
+		return (uint8_t*)0x0BADF00D;
 	}
+
+	if (cpu->page_dir.entries[pde]->entries[pte] == 0) {
+		if (pde == cpu->stack_page_table) {
+			page_base = (pde << 22) + (pte << 12);
+			printf("\nGrowing the stack to encompass page %p which starts at %p (lowest committed is page %p)\n", pte, page_base, cpu->lowest_committed_page);
+			virtual_mmap(cpu, page_base, (uint8_t*)malloc(0x1000));
+		}
+		else {
+			printf("Page fault accessing address %p.\n", vaddr);
+			cpu_dump(cpu);
+			cpu->running = 0;
+			return (uint8_t*)0xDEADBEEF;
+		}
+	}
+
+	log_instructions = old_log_instructions;
 
 	return cpu->page_dir.entries[pde]->entries[pte] + (vaddr & 0xfff);
 }
@@ -750,6 +789,14 @@ void op_1B(i386* cpu){ //sbb r16/32, r/m16/32
 		cpu_sbb32(cpu, src_ptr, dst_ptr);
 		break;
 	}
+}
+
+void op_24(i386* cpu){ //AND eax, imm32
+	cpu->eip++;
+	uint8_t imm = *virtual_to_physical_addr(cpu, cpu->eip);
+	printf("AND AL, %02x", imm);
+	cpu_and8(cpu, &(cpu->al), &imm);
+	cpu->eip++;
 }
 
 void op_25(i386* cpu){ //AND eax, imm32
@@ -2459,7 +2506,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x21
 	0, //0x22
 	0, //0x23
-	0, //0x24
+	op_24, //0x24
 	op_25, //0x25
 	0, //0x26
 	0, //0x27
@@ -2773,7 +2820,7 @@ void cpu_init(i386* cpu){
 	cpu->running = 1;
 	cpu->operand_size = 1;
 	cpu->print_addr = 1;
-	cpu->esp = STACK_BASE;
+	//cpu->esp = STACK_BASE;
 	memset(&(cpu->page_dir), 0, sizeof(i386_PD));
 }
 
@@ -2796,6 +2843,7 @@ void cpu_step(i386* cpu){
 	}
 	else{
 		op_table[byte](cpu);
+		cpu->instructions_executed++;
 	}
 
 	if (cpu->print_addr){
@@ -2826,7 +2874,7 @@ extern uint32_t debug_step(i386*);
 uint32_t cpu_reversethunk(i386* cpu, uint32_t target_addr, uint32_t escape_addr){
 	cpu_push32(cpu, &escape_addr); //push return address
 
-	printf("\nReverse thunking to address %p!\n", target_addr, cpu->eip, cpu->esp);
+	printf("\nReverse thunking to address %p!\n", target_addr);
 
 	cpu->eip = target_addr;
 
@@ -2837,7 +2885,7 @@ uint32_t cpu_reversethunk(i386* cpu, uint32_t target_addr, uint32_t escape_addr)
 		}
 	}
 
-	printf("Reverse thunk done, returning %p.", cpu->eax, cpu->eip, cpu->esp);
+	printf("Reverse thunk done, returning %p.", cpu->eax);
 	//cpu->eip -= 2;
 
 	return cpu->eax;
@@ -2850,7 +2898,7 @@ void list_blocks(){
 	RESERVED_BLOCK* temp = blocks;
 
 	while (temp){
-		printf("%p: %d pages\n", temp->address, temp->pages);
+		//printf("%p: %d pages\n", temp->address, temp->pages);
 		temp = temp->next;
 	}
 }

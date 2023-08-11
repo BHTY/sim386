@@ -17,10 +17,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include <conio.h>
+#include <time.h>
 
 #include "headers.h"
 #include "../sim386.h"
 #include "heap.h"
+
+time_t start_time;
 
 LOADED_IMAGE* loaded_images;
 WINDOW_CLASS* window_classes;
@@ -142,9 +145,10 @@ LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	wndproc_addr = lookup_classname((char*)name_buffer);
 	free(name_buffer);
 
-	printf("\nThunking WndProc(%p, %p, %p, %p)", hWnd, msg, wParam, lParam);
+	printf("\nThunking WndProc(%p, %p, %p, %p) to ", hWnd, msg, wParam, lParam);
 
 	if (wndproc_addr){
+
 		//printf("||%p||", wndproc_addr);
 		//push the arguments onto the stack
 		cpu_push32(global_cpu, &(global_cpu->eip));
@@ -152,6 +156,8 @@ LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		cpu_push32(global_cpu, (uint32_t*)&wParam);
 		cpu_push32(global_cpu, (uint32_t*)&msg);
 		cpu_push32(global_cpu, (uint32_t*)&hWnd);
+
+		printf("0x%p ", wndproc_addr);
 
 		//call the function
 		return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr); //it should return into the unthunker
@@ -164,6 +170,7 @@ LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		return return_value;
 	}
 	else{
+		printf("No WndProc found!\n");
 		return DefWindowProcA(hWnd, msg, wParam, lParam);
 	}
 }
@@ -313,8 +320,8 @@ uint32_t thunk_CreateWindowExA(i386* cpu){
 	}
 
 	uint32_t retval = (uint32_t)CreateWindowExA(dwExStyle, className, windowName, dwStyle, X, Y, nWidth, nHeight, (HWND)hWndParent, (HMENU)hMenu, (HINSTANCE)hInstance, param);
-	global = retval;
-	//printf("Window Handle: %d\n", retval);
+	/*global = retval;
+	printf("Window Handle: %d\n", retval);*/
 
 	return retval;
 }
@@ -424,7 +431,7 @@ uint32_t thunk_RegisterClassExA(i386* cpu){
 
 uint32_t thunk_GetMessageA(i386* cpu){
 	uint32_t lpMsg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
-	uint32_t hWnd = global;//*(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
 	uint32_t wMsgFilterMin = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
 	uint32_t wMsgFilterMax = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
 
@@ -1100,6 +1107,25 @@ uint32_t thunk_DeleteDC(i386* cpu){
 	return (uint32_t)DeleteDC((HDC)hdc);
 }
 
+uint32_t thunk_ReadFile(i386* cpu){
+	uint32_t hFile = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpBuffer = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t nNumberOfBytesToRead = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lpNumberOfBytesRead = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t lpOverlapped = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	LPVOID _lpBuffer = (LPVOID)virtual_to_physical_addr(cpu, lpBuffer);
+	LPDWORD _lpNumberOfBytesRead = 0;
+	if (lpNumberOfBytesRead){
+		_lpNumberOfBytesRead = (LPDWORD)virtual_to_physical_addr(cpu, lpNumberOfBytesRead);
+	}
+	LPOVERLAPPED _lpOverlapped = 0;
+	if (lpOverlapped){
+		_lpOverlapped = (LPOVERLAPPED)virtual_to_physical_addr(cpu, lpOverlapped);
+	}
+	printf("\nCalling ReadFile(%p, %p, %p, %p, %p)", hFile, lpBuffer, nNumberOfBytesToRead, lpNumberOfBytesRead, lpOverlapped);
+	return (uint32_t)ReadFile((HANDLE)hFile, (LPVOID)_lpBuffer, (DWORD)nNumberOfBytesToRead, (LPDWORD)_lpNumberOfBytesRead, (LPOVERLAPPED)_lpOverlapped);
+}
+
 uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA, //0x00 - 0x07
 									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA, //0x08 - 0x0F
 									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint, //0x10 - 0x17
@@ -1110,7 +1136,7 @@ uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thu
 									   thunk_TextOutA, thunk_GetTextExtentPointA, thunk_DeleteObject, thunk_SetCapture, thunk_ReleaseCapture, thunk_ShowCursor, thunk_SetCursor, thunk_SetFocus, //0x38 - 0x3F
 									   thunk_PostMessageA, thunk_EnableMenuItem, thunk_IsIconic, thunk_GetKeyState, thunk_SetTimer, thunk_KillTimer, thunk_Ellipse, thunk_ShellAboutA, //0x40 - 0x47
 									   thunk_GetWindowDC, thunk_SendMessageA, thunk_GetDlgItem, thunk_GetDlgItemInt, thunk_DrawMenuBar, thunk_GetEnvironmentStringsA, thunk_CreateICA, thunk_StretchBlt, //0x48 - 0x4F
-									   thunk_GetPixel, thunk_BitBlt, thunk_CreateCompatibleDC, thunk_CreateCompatibleBitmap, thunk_CreatePen, thunk_DeleteDC, 0, 0, //0x50 - 0x57
+									   thunk_GetPixel, thunk_BitBlt, thunk_CreateCompatibleDC, thunk_CreateCompatibleBitmap, thunk_CreatePen, thunk_DeleteDC, thunk_ReadFile, 0, //0x50 - 0x57
 									   0, 0, 0, 0, 0, 0, 0, 0};
 
 void handle_syscall(i386* cpu){
@@ -1180,6 +1206,9 @@ int load_pe_header(LOADED_PE_IMAGE* image){
 }
 
 void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
+	uint32_t stack_base;
+	uint32_t lowest_committed_stack_address;
+
 	_IMAGE_OPTIONAL_HEADER* optional_header = &(image->nt_headers->OptionalHeader);	
 
 	if (taken_bases == 0){
@@ -1206,23 +1235,27 @@ void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
 	
 	printf("  Image Base: %p\n", image->image_base);
 	printf("  Entry Point: %p\n", image->entry_point);
-	printf("  Stack Size: %d bytes committed (%d reserved)\n", image->stack_commit, image->stack_reserve);
 	printf("  Heap Size: %d bytes committed (%d reserved)\n", image->heap_commit, image->heap_reserve);
 	printf("  Total Size: %d bytes (section alignment %d bytes, file alignment %d bytes)\n", optional_header->SizeOfImage, optional_header->SectionAlignment, optional_header->FileAlignment);
 
 	//allocate a stack if none exists
-	uint32_t stack_pde = GET_PDE(STACK_BASE - 0x1000);
-	uint32_t stack_pte = GET_PTE(STACK_BASE - 0x1000);
+	stack_base = scan_free_address_space(cpu, image->stack_commit >> 12, 0x100);
+	reserve_address_space(cpu, stack_base, image->stack_commit >> 12);
+	lowest_committed_stack_address = stack_base + image->stack_reserve - image->stack_commit;
 
-	if (cpu->page_dir.entries[stack_pde] == 0){
+	printf("  Reserving %d bytes for stack from %p (%d committed from %p)\n", image->stack_reserve, stack_base, image->stack_commit, lowest_committed_stack_address);
+	
+	uint32_t stack_pde = GET_PDE(stack_base);
+
+	if (cpu->page_dir.entries[stack_pde] == 0) {
 		cpu->page_dir.entries[stack_pde] = (i386_PT*)malloc(sizeof(i386_PT));
 		memset(cpu->page_dir.entries[stack_pde], 0, sizeof(i386_PT));
 	}
 
-	if (cpu->page_dir.entries[stack_pde]->entries[stack_pte] == 0){
-		virtual_mmap(cpu, STACK_BASE - 0x1000, (uint8_t*)malloc(0x1000));
-		virtual_mmap(cpu, STACK_BASE, (uint8_t*)malloc(0x1000));
-	}
+	map_section(cpu, lowest_committed_stack_address, (uint8_t*)malloc(image->stack_commit), image->stack_commit);
+	cpu->esp = stack_base + image->stack_reserve; //set to stack top
+	cpu->stack_page_table = stack_pde;
+	cpu->lowest_committed_page = GET_PTE(lowest_committed_stack_address);
 }
 
 void parse_id(LOADED_PE_IMAGE* image, IMAGE_IMPORT_DESCRIPTOR* import_desc, BYTE* address_base, i386* cpu);
@@ -1291,8 +1324,11 @@ void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
 	IMAGE_RESOURCE_DIRECTORY_ENTRY* dirEntry;
 	IMAGE_RESOURCE_DIRECTORY* subdir;
 	IMAGE_RESOURCE_DIRECTORY_ENTRY* subDirEntry;
+	IMAGE_RESOURCE_DIRECTORY* subSubdir;
+	IMAGE_RESOURCE_DIRECTORY_ENTRY* subSubDirEntry;
 	IMAGE_RESOURCE_DATA_ENTRY* entry;
 	uint32_t pointer;
+	uint32_t pointer2;
 
 	int total_entries;
 
@@ -1322,7 +1358,24 @@ void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
 					subDirEntry++;
 				}
 				for (int p = 0; p < subdir->NumberOfIdEntries; p++){
-					printf("        ID: %d IsDirectory: %d Address: %p\n", subDirEntry->Id, subDirEntry->DataIsDirectory, image->image_base + data_dir->VirtualAddress + subDirEntry->OffsetToDirectory);
+					pointer2 = image->image_base + data_dir->VirtualAddress + (subDirEntry->OffsetToDirectory & 0x7FFFFFFF);
+					printf("        ID: %d IsDirectory: %d Address: %p\n", subDirEntry->Id, subDirEntry->DataIsDirectory, pointer2);
+					
+					if (subDirEntry->DataIsDirectory){
+						subSubdir = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, pointer2);
+						printf("          Resource Directory: %d entries\n", subSubdir->NumberOfIdEntries + subSubdir->NumberOfNamedEntries);
+						subSubDirEntry = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(subSubdir + 1);
+
+						for (int n = 0; n < subSubdir->NumberOfIdEntries; n++){
+							printf("            Type %d | ", subSubDirEntry->Id);
+							if (subSubDirEntry->DataIsDirectory == 0){
+								printf("Codepage = %d Data begins at %p\n", ((IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, image->image_base + data_dir->VirtualAddress + subSubDirEntry->OffsetToData))->CodePage, ((IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, image->image_base + data_dir->VirtualAddress + subSubDirEntry->OffsetToData))->OffsetToData);
+							}
+
+							subSubDirEntry++;
+						}
+					}
+					
 					subDirEntry++;
 				}
 			}
@@ -1655,6 +1708,7 @@ void resolve_imports(LOADED_PE_IMAGE* image, i386* cpu){
 }
 
 uint32_t debug_step(i386* cpu){
+#ifndef NO_DEBUGGER
 	FILE* fp;
 	BREAKPOINT* temp;
 	BREAKPOINT* temp2;
@@ -1676,10 +1730,8 @@ uint32_t debug_step(i386* cpu){
 
 		printf("(%p) ", cpu->eip);
 
-#ifndef HEADLESS
 		gets(buf);
 		sscanf(buf, "%s %x %x", option, &value, &value_2);
-#endif
 
 		if (strlen(buf) == 0) return 0;
 
@@ -1779,6 +1831,16 @@ uint32_t debug_step(i386* cpu){
 		else if (strcmp(option, "st") == 0){
 			cpu_trace(cpu);
 		}
+		else if (strcmp(option, "pt") == 0) {
+			if (cpu->page_dir.entries[value]) {
+				printf("Page %p:%p (VMA %Xxxx) is mapped to address %p\n", value, value_2, (value << 10) + (value_2), cpu->page_dir.entries[value]->entries[value_2]);
+			} else {
+				printf("Page table %p is not mapped into virtual memory.\n", value);
+			}
+		}
+		else if (strcmp(option, "pd") == 0) {
+			printf("The page table %p (VMA %p - %p) is located at host memory address %p\n", value, value << 22, ((value + 1) << 22) - 1, cpu->page_dir.entries[value]);
+		}
 		else if (strcmp(option, "help") == 0){
 			printf("sim80386 machine language monitor / debugger by Will Klees\n");
 			printf("COMMAND SET\n");
@@ -1799,6 +1861,8 @@ uint32_t debug_step(i386* cpu){
 			printf("ex str:name - Prints out all of the exports of a given PE image\n");
 			printf("li - Lists images loaded into memory\n");
 			printf("st - Stack trace (only works if the program sets up stack frames via EBP)\n");
+			printf("pd hex:addr - Lists the address of page directory entry addr\n");
+			printf("pt hex:addr1 hex:addr2 - Lists the address of page table entry addr2 inside page table addr1\n");
 			printf("e - Exits\n");
 		}
 		else{
@@ -1826,12 +1890,12 @@ uint32_t debug_step(i386* cpu){
 		cpu_step(cpu);
 	}
 
-	if (cpu->running && cpu->single_step == 0 & kbhit()){
+	/*if (cpu->running && cpu->single_step == 0 && kbhit()) {
 		getch();
 		printf("Break.\n");
 		cpu->running = 0;
 		cpu->single_step = 1;
-	}
+	}*/
 
 	if (cpu->fixing_breakpoint){ //return 0xCC to the breakpoint
 		*virtual_to_physical_addr(cpu, temp->addr) = 0xCC;
@@ -1853,11 +1917,25 @@ uint32_t debug_step(i386* cpu){
 	}
 
 	return 0;
+#else
+	if (cpu->running) {
+		cpu_step(cpu);
+	}
+	else {
+		if (cpu->escaping) {
+			cpu->escaping = 0;
+			cpu->running = 1;
+			return 1;
+		}
+	}
+	return 0;
+#endif
 }
 
 uint8_t escape_routine[3] = {0xcd, 0xff, 0xc3};
 
 LOADED_PE_IMAGE load_pe_executable(char* filename, i386* cpu){
+	reserve_address_space(cpu, 0x00000000, 0x400);
 	LOADED_PE_IMAGE image = load_pe_file(filename);
 	parse_headers(&image, cpu);
 	cpu->running = 0;
@@ -1868,11 +1946,15 @@ LOADED_PE_IMAGE load_pe_executable(char* filename, i386* cpu){
 	escape_addr = 0xFFFF0000;
 	global_cpu = cpu;
 	virtual_mmap(cpu, escape_addr, escape_routine);
-	reserve_address_space(cpu, 0x00000000, 0x400);
 
 	//allocate the heap
 	heap_init();
 	//alloc_heap(cpu, image.heap_commit, image.heap_reserve); //put it in the PEB
+
+#ifdef NO_DEBUGGER
+	cpu->running = 1;
+	cpu->single_step = 0;
+#endif
 
 	return image;
 }
@@ -1892,8 +1974,11 @@ int main(int argc, char* argv[])
 	cpu_init(&CPU);
 
 	LOADED_PE_IMAGE hello = load_pe_executable(argv[1], &CPU);
+	log_instructions = 0;
 
 	while (1){
 		debug_step(&CPU);
 	}
+
+	puts("We're done here!\n");
 }

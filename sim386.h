@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 //#define HEADLESS
+//#define NO_DEBUGGER
 
 #ifdef HEADLESS
 #define printf(...)
@@ -10,7 +11,9 @@
 
 #define ALIGN(x, val)		(((x % val) == 0) ? x : (x + val) - x % val)
 
-#define STACK_BASE 0x4000000
+//NOT USED ANYMORE!!!
+#define STACK_BASE 0x400000
+
 
 #define GET_PDE(addr) (addr >> 22)
 #define GET_PTE(addr) ((addr & 0x3ff000) >> 12)
@@ -203,6 +206,10 @@ typedef struct{
 	int single_step;
 	int fixing_breakpoint;
 	int escaping;
+	uint32_t instructions_executed;
+
+	uint32_t stack_page_table;
+	uint32_t lowest_committed_page;
 } i386; //address size?
 
 typedef struct RESERVED_BLOCK{
@@ -228,3 +235,4 @@ void reserve_address_space(i386* cpu, uint32_t offset, uint32_t num_pages);
 uint32_t scan_free_address_space(i386* cpu, uint32_t num_pages, uint32_t increment);
 
 extern void(*extended_op_table[256])(i386* cpu);
+extern int log_instructions;
