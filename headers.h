@@ -175,4 +175,14 @@ Step 2.) Call CreateWindow
 		hInstance - Substituted for the HINSTANCE of the host, but used to find the REGISTERED_WINDOW_CLASS
 		lpParam - NULL (not handled for now)
 	The linked list of TIMER structs is initialized to zero and the Win32 HWND returned by CreateWindow is stored in the active window table
+
+
+How does dummy_WndProc know what to call?
+Find the ACTIVE_WINDOW corresponding to the hwnd, then go into the window class table using ACTIVE_WINDOW.wndclass and call the function.
+
+SetTimer()
+None of the arguments are mutated except for SetTimer(). If it's zero, it's passed as such, but otherwise, it's replaced with dummy_TimerProc. The 
+actual TimerProc passed is then passed as a parameter to register_window_timer alongside the ACTIVE_WINDOW and timer ID.
+When dummy_TimerProc is called, it first summons the ACTIVE_WINDOW corresponding to the hwnd. It then reverse thunks into the TimerProc whose ID
+corresponds to wParam.
 */
