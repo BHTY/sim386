@@ -404,9 +404,13 @@ uint32_t thunk_LoadIconA(i386* cpu){
 
 	uint32_t icon_id;
 	uint32_t icon_size;
+
+	int is_name = 0;
 	
 	uint32_t hInstance = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	uint32_t lpIconName = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	LPCSTR _lpIconName = 0;
+	LPWSTR __lpIconName;
 
 	printf("\nCalling LoadIconA(%p, %p)", hInstance, lpIconName);
 
@@ -416,9 +420,18 @@ uint32_t thunk_LoadIconA(i386* cpu){
 		return (uint32_t)LoadIconA((HINSTANCE)hInstance, (LPCSTR)lpIconName);
 	}
 	else { //support string names
-		data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, instance->image_base + instance->root_rsdir, (LPWSTR)RT_GROUP_ICON, (LPWSTR)lpIconName, 0, 0)); //fill in 3 & 0
+		if (!IS_INTRESOURCE(lpIconName)) {
+			_lpIconName = (LPCSTR)virtual_to_physical_addr(cpu, lpIconName);
+			__lpIconName = (LPWSTR)malloc(strlen(_lpIconName) * 2 + 2);
+			MultiByteToWideChar(CP_ACP, 0, _lpIconName, -1, __lpIconName, strlen(_lpIconName) + 1);
+			is_name = 1;
+		}
+		else {
+			__lpIconName = (LPWSTR)lpIconName;
+		}
 
-		printf("Data entry points to %p\n", data_entry->OffsetToData);
+		data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, instance->image_base + instance->root_rsdir, (LPWSTR)RT_GROUP_ICON, __lpIconName, 0, is_name));
+
 		icon_dir = (GRPICONDIR*)virtual_to_physical_addr(cpu, data_entry->OffsetToData + instance->image_base);
 
 		//now the smart thing to do would be to find the best icon in the icon directory but I'm just going to use the first one because lol
@@ -443,7 +456,7 @@ uint32_t thunk_RegisterClassA(i386* cpu){
 	uint32_t lpWndClass = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	WNDCLASSA* wc = (WNDCLASSA*)virtual_to_physical_addr(cpu, lpWndClass);
 
-	printf("\nCalling RegisterClassA(%p) with result %04x", lpWndClass);
+	printf("\nCalling RegisterClassA(%p)", lpWndClass);
 
 	//replace wc->lpszClassName
 	if (wc->lpszClassName != 0) {
@@ -462,15 +475,16 @@ uint32_t thunk_RegisterClassA(i386* cpu){
 	//find the menu and then use LoadMenuIndirectA
 	if (wc->lpszMenuName) {
 		if ((uint32_t)wc->lpszMenuName > 65535) {
+			wc->lpszMenuName = (LPCSTR)virtual_to_physical_addr(cpu, (uint32_t)wc->lpszMenuName);
 			menu_name = (LPWSTR)malloc(strlen(wc->lpszMenuName) * 2 + 2);
 			MultiByteToWideChar(CP_ACP, 0, wc->lpszMenuName, -1, menu_name, strlen(wc->lpszMenuName) + 1);
 		}
 		else {
 			menu_name = (LPWSTR)wc->lpszMenuName;
 		}
+
 		menu_data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, window_class.hInstance->image_base + window_class.hInstance->root_rsdir, (LPWSTR)RT_MENU, menu_name, 0, (uint32_t)wc->lpszMenuName > 65535));
 		window_class.hMenu = LoadMenuIndirectA(virtual_to_physical_addr(cpu, window_class.hInstance->image_base + menu_data_entry->OffsetToData));
-		printf("\n%p\n", window_class.hMenu);
 		wc->lpszMenuName = 0;
 	}
 
@@ -962,11 +976,17 @@ uint32_t thunk_LoadStringA(i386* cpu){
 	uint32_t cchBufferMax = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
 	LPSTR _lpBuffer = (LPSTR)virtual_to_physical_addr(cpu, lpBuffer);
 
+	printf("\nCalling LoadStringA(%p, %p, %p, %p)", hInstance, uID, lpBuffer, cchBufferMax);
+
+	//there are problems here
+	// the proper way to handle this doesn't assume that string table 1 contains the desired string: the real play is to enumerate over all of the RT_STRINGs
+	// find the lowest one and go from there until you find the desired nID
+	// the tough part imo is when nIDs start at 300 or something (in Reversi, they start from 3, but there's still (empty) strings 0, 1, and 2 in the string table)
+
 	data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, root_instance->image_base + root_instance->root_rsdir, (LPWSTR)RT_STRING, (LPWSTR)1, 0, 0));
+
 	string_table = data_entry->OffsetToData + root_instance->image_base;
 	string_ptr = (uint16_t*)virtual_to_physical_addr(cpu, find_string(cpu, string_table, uID));
-
-	printf("\nCalling LoadStringA(%p, %p, %p, %p)", hInstance, uID, lpBuffer, cchBufferMax);
 
 	return WideCharToMultiByte(CP_ACP, 0, (LPWCH)(string_ptr + 1), *string_ptr, _lpBuffer, cchBufferMax, NULL, NULL);
 }
@@ -1522,9 +1542,6 @@ void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
 	printf("  Heap Size: %d bytes committed (%d reserved)\n", image->heap_commit, image->heap_reserve);
 	printf("  Total Size: %d bytes (section alignment %d bytes, file alignment %d bytes)\n", optional_header->SizeOfImage, optional_header->SectionAlignment, optional_header->FileAlignment);
 
-	//allocate a heap
-	alloc_heap(cpu, image->heap_commit, image->heap_reserve);
-
 	//allocate a stack if none exists
 	stack_base = scan_free_address_space(cpu, image->stack_commit >> 12, 0x100);
 	reserve_address_space(cpu, stack_base, image->stack_commit >> 12);
@@ -1552,11 +1569,15 @@ void parse_id(LOADED_PE_IMAGE* image, IMAGE_IMPORT_DESCRIPTOR* import_desc, BYTE
 IMAGE_RESOURCE_DIRECTORY_ENTRY* find_resource_entry(i386* cpu, uint32_t pRootDirectory, IMAGE_RESOURCE_DIRECTORY* rsDir, LPWSTR id, int name_or_id) {
 	IMAGE_RESOURCE_DIRECTORY_ENTRY* dirEntry = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(rsDir + 1);
 	LPWSTR name;
+	WORD string_length;
+	int equals;
 
 	for (int i = 0; i < rsDir->NumberOfNamedEntries; i++) {
 		if (name_or_id && dirEntry->NameIsString) {
 			name = (LPWSTR)virtual_to_physical_addr(cpu, pRootDirectory + dirEntry->NameOffset);
-			if (wcscmp(name, id) == 0) return dirEntry;
+			string_length = name[0];
+			name++;
+			if (CompareStringEx(LOCALE_NAME_SYSTEM_DEFAULT, NORM_IGNORECASE, name, string_length, id, -1, NULL, NULL, NULL)) return dirEntry;
 		}
 
 		dirEntry++;
@@ -1586,6 +1607,7 @@ uint32_t find_resource(i386* cpu, uint32_t pRootDirectory, LPWSTR resourceType, 
 	//parse the layer 1 directory to find the resource of the correct name/ID
 	rsDir2 = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, pRootDirectory + (dirEntry->OffsetToData & 0x7FFFFFFF));
 	dirEntry2 = find_resource_entry(cpu, pRootDirectory, rsDir2, resourceName, name_id);
+	//access the resource itself and access the data entry
 	rsDir3 = (IMAGE_RESOURCE_DIRECTORY*)virtual_to_physical_addr(cpu, pRootDirectory + (dirEntry2->OffsetToData & 0x7FFFFFFF));
 	dirEntry3 = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(rsDir3 + 1);
 
@@ -1828,8 +1850,8 @@ void parse_text(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu){
 	}
 }
 
-void parse_data(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu){
-	printf("    %d bytes initialized data, %d bytes uninitialized data\n", sec->SizeOfRawData, sec->Misc.VirtualSize - sec->SizeOfRawData);
+void parse_data(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu, uint32_t sectionSize){
+	printf("    %d bytes initialized data, %d bytes uninitialized data\n", sec->SizeOfRawData, sectionSize - sec->SizeOfRawData);
 }
 
 void parse_section_headers(LOADED_PE_IMAGE* image, i386* cpu){
@@ -1859,7 +1881,7 @@ void parse_section_headers(LOADED_PE_IMAGE* image, i386* cpu){
 		} else if (strcmp((const char*)current_section.Name, ".reloc") == 0){
 			parse_rt(image, &current_section, cpu);
 		} else if (strcmp((const char*)current_section.Name, ".data") == 0){
-			parse_data(image, &current_section, cpu);
+			parse_data(image, &current_section, cpu, sectionSize);
 		}else if (strcmp((const char*)current_section.Name, ".rsrc") == 0){
 			image->resource_offset = current_section.VirtualAddress;
 		}
