@@ -87,6 +87,20 @@ uint16_t find_window_class(uint32_t hInstance, LPWSTR name) {
 	return 0;
 }
 
+uint16_t create_dialog_box_window_class(uint32_t wndproc, EMU_HINSTANCE* hInstance) {
+	for (int i = 1; i < 65536; i++) {
+		if (registered_window_classes[i].used == 0) {
+			registered_window_classes[i].hMenu = 0;
+			registered_window_classes[i].hInstance = hInstance;
+			registered_window_classes[i].class_name = L"#32770";
+			registered_window_classes[i].global = 0;
+			registered_window_classes[i].used = 1;
+			registered_window_classes[i].wndproc = wndproc;
+			return i;
+		}
+	}
+}
+
 EMU_HINSTANCE* find_instance(uint32_t hInstance) {
 	EMU_HINSTANCE* instance = root_instance;
 
@@ -220,6 +234,68 @@ LRESULT CALLBACK dummy_TimerProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 	}
 }
 
+BOOL CALLBACK enumproc_icons(HWND hwnd, LPARAM lParam) {
+	char string[400];
+	LONG wndlong = GetWindowLongA(hwnd, GWL_STYLE);
+	HICON hIcon = LoadIconA(NULL, IDI_ASTERISK);
+
+	if ((wndlong & SS_ICON) == SS_ICON) {
+		SendMessageA(hwnd, STM_SETICON, (WPARAM)hIcon, 0);
+	}
+
+	return 1;
+}
+
+LRESULT CALLBACK dummy_DlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+	ACTIVE_WINDOW* window = find_window((uint32_t)hWnd);
+	uint32_t wndproc_addr;
+	LRESULT return_value;
+	HICON hIcon;
+
+	printf("\nThunking DlgProc(%p, %p, %p, %p) to ", hWnd, msg, wParam, lParam);
+
+	if (window) {
+		wndproc_addr = registered_window_classes[window->wndclass].wndproc;
+	}
+	else {
+		if (temp_window_class) { //the window is being created as we speak
+			wndproc_addr = registered_window_classes[temp_window_class].wndproc;
+			add_window((uint32_t)hWnd, temp_window_class);
+			EnumChildWindows(hWnd, enumproc_icons, 0);
+		}
+		else {
+			printf("No DlgProc found! (temp=%x)\n", temp_window_class);
+			return DefDlgProcA(hWnd, msg, wParam, lParam);
+		}
+	}
+
+	//push the args onto the stack
+	cpu_push32(global_cpu, &(global_cpu->eip));
+	cpu_push32(global_cpu, (uint32_t*)&lParam);
+	cpu_push32(global_cpu, (uint32_t*)&wParam);
+	cpu_push32(global_cpu, (uint32_t*)&msg);
+	cpu_push32(global_cpu, (uint32_t*)&hWnd);
+	printf("0x%p ", wndproc_addr);
+
+	//call the function
+	return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr);
+
+	if (return_value == 0) { //there are a few messages that WE should handle
+		switch (msg) {
+			case WM_GETICON:
+				hIcon = LoadIcon(NULL, IDI_QUESTION);
+				return_value = (LRESULT)hIcon;
+				break;
+			default:
+				break;
+		}
+	}
+
+	printf(" Finished DlgProc=%p!", return_value);
+
+	return return_value;
+}
+
 LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam){
 	ACTIVE_WINDOW* window = find_window((uint32_t)hWnd);
 	uint32_t wndproc_addr;
@@ -231,11 +307,12 @@ LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		wndproc_addr = registered_window_classes[window->wndclass].wndproc;
 	}
 	else {
-		if (temp_window_class) {
+		if (temp_window_class) { //the window is being created as we speak
 			wndproc_addr = registered_window_classes[temp_window_class].wndproc;
+			add_window((uint32_t)hWnd, temp_window_class);
 		}
 		else {
-			printf("No WndProc found!\n");
+			printf("No WndProc found! (temp=%x)\n", temp_window_class);
 			return DefWindowProcA(hWnd, msg, wParam, lParam);
 		}
 	}
@@ -363,6 +440,7 @@ uint32_t thunk_RegisterClassA(i386* cpu){
 	window_class.wndproc = (uint32_t)wc->lpfnWndProc;
 	window_class.hInstance = find_instance((uint32_t)wc->hInstance);
 	window_class.used = 1;
+	window_class.hMenu = 0;
 	
 	//find the menu and then use LoadMenuIndirectA
 	if (wc->lpszMenuName) {
@@ -449,11 +527,10 @@ uint32_t thunk_CreateWindowExA(i386* cpu){
 
 	//we need to save the window class into a temporary variable so that WndProc can work before the application is done being set up
 	temp_window_class = wndclass;
+
 	uint32_t retval = (uint32_t)CreateWindowExA(dwExStyle, _lpClassName, _lpWindowName, dwStyle, X, Y, nWidth, nHeight, (HWND)hWndParent, (HMENU)hMenu, (HINSTANCE)hInstance, _lpParam);
 	temp_window_class = 0;
 
-	add_window(retval, wndclass);
-	
 	return retval;
 }
 
@@ -860,14 +937,24 @@ uint32_t thunk_CreateSolidBrush(i386* cpu){
 }
 
 uint32_t thunk_LoadStringA(i386* cpu){
+	IMAGE_RESOURCE_DATA_ENTRY* data_entry;
+	uint32_t string_table;
+	uint16_t* string_ptr;
+
 	uint32_t hInstance = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	uint32_t uID = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
 	uint32_t lpBuffer = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
 	uint32_t cchBufferMax = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
 	LPSTR _lpBuffer = (LPSTR)virtual_to_physical_addr(cpu, lpBuffer);
-	*_lpBuffer = 0;
+
+	data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, root_instance->image_base + root_instance->root_rsdir, (LPWSTR)RT_STRING, (LPWSTR)1, 0, 0));
+	string_table = data_entry->OffsetToData + root_instance->image_base;
+	string_ptr = (uint16_t*)virtual_to_physical_addr(cpu, find_string(cpu, string_table, uID));
+
+	WideCharToMultiByte(CP_ACP, 0, (LPWCH)(string_ptr + 1), *string_ptr, _lpBuffer, cchBufferMax, NULL, NULL);
 
 	printf("\nCalling LoadStringA(%p, %p, %p, %p)", hInstance, uID, lpBuffer, cchBufferMax);
+
 	return 0;
 }
 
@@ -1261,6 +1348,53 @@ uint32_t thunk_ReadFile(i386* cpu){
 	return (uint32_t)ReadFile((HANDLE)hFile, (LPVOID)_lpBuffer, (DWORD)nNumberOfBytesToRead, (LPDWORD)_lpNumberOfBytesRead, (LPOVERLAPPED)_lpOverlapped);
 }
 
+uint32_t thunk_DialogBoxParamA(i386* cpu) {
+	IMAGE_RESOURCE_DATA_ENTRY *data_entry;
+	HWND return_value;
+	LPCDLGTEMPLATEA lpTemplate;
+	LPWSTR resource_id;
+	EMU_HINSTANCE* instance;
+
+	uint32_t hInstance = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t lpTemplateName = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	uint32_t hWndParent = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
+	uint32_t lpDialogFunc = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
+	uint32_t dwInitParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 20);
+	printf("\nCalling DialogBoxParamA(%p, %p, %p, %p, %p)", hInstance, lpTemplateName, hWndParent, lpDialogFunc, dwInitParam);
+	
+	LPCTSTR _lpTemplateName = 0;
+	if (!lpTemplateName) return 0;
+
+	if (lpTemplateName < 65536) { //ID
+		resource_id = (LPWSTR)lpTemplateName;
+	}
+	else { //name
+		_lpTemplateName = (LPCTSTR)virtual_to_physical_addr(cpu, lpTemplateName);
+		resource_id = (LPWSTR)malloc(strlen(_lpTemplateName) * 2 + 2);
+		MultiByteToWideChar(CP_ACP, 0, _lpTemplateName, -1, resource_id, strlen(_lpTemplateName) + 1);
+	}
+
+	instance = find_instance(hInstance);
+	if (instance == 0) return 0;
+
+	data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, instance->image_base + instance->root_rsdir, (LPWSTR)RT_DIALOG, resource_id, 0, lpTemplateName > 65535));
+	lpTemplate = (LPCDLGTEMPLATEA)virtual_to_physical_addr(cpu, data_entry->OffsetToData + instance->image_base);
+		
+	temp_window_class = create_dialog_box_window_class(lpDialogFunc, instance);
+	//return_value = CreateDialogIndirectParamA(GetModuleHandle(NULL), lpTemplate, (HWND)hWndParent, (DLGPROC)dummy_DlgProc, dwInitParam);
+	return_value = (HWND)DialogBoxIndirectParamA(GetModuleHandle(NULL), lpTemplate, (HWND)hWndParent, (DLGPROC)dummy_DlgProc, dwInitParam);
+	temp_window_class = 0;
+
+	return (uint32_t)return_value;
+}
+
+uint32_t thunk_EndDialog(i386* cpu) {
+	uint32_t hDlg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	uint32_t nResult = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
+	printf("\nCalling EndDialog(%p, %p)", hDlg, nResult);
+	return (uint32_t)EndDialog((HWND)hDlg, (INT_PTR)nResult);
+}
+
 uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA, //0x00 - 0x07
 									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA, //0x08 - 0x0F
 									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint, //0x10 - 0x17
@@ -1271,8 +1405,8 @@ uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thu
 									   thunk_TextOutA, thunk_GetTextExtentPointA, thunk_DeleteObject, thunk_SetCapture, thunk_ReleaseCapture, thunk_ShowCursor, thunk_SetCursor, thunk_SetFocus, //0x38 - 0x3F
 									   thunk_PostMessageA, thunk_EnableMenuItem, thunk_IsIconic, thunk_GetKeyState, thunk_SetTimer, thunk_KillTimer, thunk_Ellipse, thunk_ShellAboutA, //0x40 - 0x47
 									   thunk_GetWindowDC, thunk_SendMessageA, thunk_GetDlgItem, thunk_GetDlgItemInt, thunk_DrawMenuBar, thunk_GetEnvironmentStringsA, thunk_CreateICA, thunk_StretchBlt, //0x48 - 0x4F
-									   thunk_GetPixel, thunk_BitBlt, thunk_CreateCompatibleDC, thunk_CreateCompatibleBitmap, thunk_CreatePen, thunk_DeleteDC, thunk_ReadFile, 0, //0x50 - 0x57
-									   0, 0, 0, 0, 0, 0, 0, 0};
+									   thunk_GetPixel, thunk_BitBlt, thunk_CreateCompatibleDC, thunk_CreateCompatibleBitmap, thunk_CreatePen, thunk_DeleteDC, thunk_ReadFile, thunk_DialogBoxParamA, //0x50 - 0x57
+									   thunk_EndDialog, 0, 0, 0, 0, 0, 0, 0};
 
 void handle_syscall(i386* cpu){
 	int function_id = cpu->eax;
@@ -1438,6 +1572,18 @@ uint32_t find_resource(i386* cpu, uint32_t pRootDirectory, LPWSTR resourceType, 
 	dirEntry3 = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(rsDir3 + 1);
 
 	return pRootDirectory + (dirEntry3->OffsetToData & 0x7FFFFFFF);
+}
+
+uint32_t find_string(i386* cpu, uint32_t string_base, uint32_t string_id) {
+	uint32_t current_ptr = string_base;
+	WORD current_length;
+
+	for (int i = 0; i < string_id; i++) {
+		current_length = *(WORD*)virtual_to_physical_addr(cpu, current_ptr);
+		current_ptr += (current_length * 2) + 2;
+	}
+
+	return current_ptr;
 }
 
 void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
@@ -2070,6 +2216,8 @@ LOADED_PE_IMAGE load_pe_executable(char* filename, i386* cpu){
 
 int main(int argc, char* argv[])
 {
+	IMAGE_RESOURCE_DATA_ENTRY* data_entry;
+	uint32_t string_table;
 	FILE* fp;
 
 	int single_step = 1;

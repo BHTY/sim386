@@ -100,6 +100,7 @@ typedef struct WINDOW_TIMER {
 } WINDOW_TIMER;
 
 uint32_t find_resource(i386* cpu, uint32_t pRootDirectory, LPWSTR resourceType, LPWSTR resourceName, int type_id, int name_id);
+uint32_t find_string(i386* cpu, uint32_t string_base, uint32_t string_id);
 
 /* 
 The (mostly linked) lists I'll need

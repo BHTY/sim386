@@ -621,6 +621,8 @@ uint32_t calc_modrm_addr(i386* cpu, uint8_t modrm){
 }
 
 uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr){
+	char error_string[100];
+
 	uint32_t pde = GET_PDE(vaddr);
 	uint32_t pte = GET_PTE(vaddr);
 	uint32_t page_base;
@@ -629,7 +631,9 @@ uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr){
 	log_instructions = 1;
 
 	if (cpu->page_dir.entries[pde] == 0){
-		printf("Page fault accessing address %p.\n", vaddr);
+		sprintf(error_string, "Page fault accessing address %p.\nEIP = %p ESP = %p", vaddr, cpu->eip, cpu->esp);
+		MessageBoxA(NULL, error_string, "General Protection Fault", MB_ABORTRETRYIGNORE | MB_ICONERROR);
+		printf(error_string);
 		cpu_dump(cpu);
 		cpu->running = 0;
 		return (uint8_t*)0x0BADF00D;
@@ -642,7 +646,9 @@ uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr){
 			virtual_mmap(cpu, page_base, (uint8_t*)malloc(0x1000));
 		}
 		else {
-			printf("Page fault accessing address %p.\n", vaddr);
+			sprintf(error_string, "Page fault accessing address %p.EIP = %p ESP = %p\n", vaddr, cpu->eip, cpu->esp);
+			MessageBoxA(NULL, error_string, "General Protection Fault", MB_ABORTRETRYIGNORE | MB_ICONERROR);
+			printf(error_string);
 			cpu_dump(cpu);
 			cpu->running = 0;
 			return (uint8_t*)0xDEADBEEF;
