@@ -1,7 +1,7 @@
 win32emu To-do List
 - Fix import data directory walking
 - Get more programs working (make sure to try a wide variety of CRTs)
-  - Get Reversi working @ 100% - ``LoadIconA`` & ``LoadAcceleratorA``
+  - Get Reversi working @ 100% (fix icons in dialogs)
   - Get FreeCell working
 - Fix the heap manager
 - ``VirtualAlloc``
