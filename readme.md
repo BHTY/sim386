@@ -6,7 +6,7 @@ win32emu To-do List
     - Short of rewriting the dialog manager, the only real option seems to be to scan the dialog template for any resource references, then enumerate over the child windows of the dialog box and "fix" those references. Right now, when a dialog box is created, I ``EnumChildWindows`` and set a default icon for every control with the ``SS_ICON`` style
   - Get FreeCell working (I'm certain there's other fixes that we'll need (beyond implementing additional imports) but one right now is ``LoadStringA``)
     - Reversi was a trivial case for string resources because it only contained one string table and the string IDs started from 0 (resource editors show it starting from 3 but all string tables have 16 strings, it's just that 0-2 were all of zero-length) - FreeCell on the other hand will require me to go through all of the string tables until I find the right string (and I'll need to find the number of the first numbered string?)
-  - CL seems like a daunting task but it could perhaps be made to work
+  - CL seems like a daunting task but it could perhaps be made to work? DoomGeneric/Win32? The sky is the limit
 - Memory Management
   - Make the heap allocator actually work and not be a giant hack (it can't free and can't grow heaps)
   - ``VirtualAlloc`` - this'll be important for things like ``CreateDIBSection`` down the road
