@@ -1,6 +1,6 @@
 win32emu To-do List
 - Fix import data directory walking
-- Get more programs working (make sure to try a wide variety of CRTs)
+- Get more programs working (make sure to try a wide variety of CRTs - right now the Visual C++ 4.0 one seems to work)
   - Get Reversi working @ 100% (fix icons in dialogs)
     - The issue here is that ``DialogBoxIndirectParam`` expects any icons (and probably certain other resources) found in the dialog template to be found in the ``HINSTANCE`` that you pass it (which is not the case here since the emulated instance handles != the real ones) so any icons just won't show up (though the ``ICON`` controls will still be created, they'll be drawing icons that don't exist -> they'll be blank)
     - Short of rewriting the dialog manager, the only real option seems to be to scan the dialog template for any resource references, then enumerate over the child windows of the dialog box and "fix" those references. Right now, when a dialog box is created, I ``EnumChildWindows`` and set a default icon for every control with the ``SS_ICON`` style
