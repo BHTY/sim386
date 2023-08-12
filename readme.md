@@ -14,7 +14,7 @@ win32emu To-do List
 - Make sure the CRT initialization code actually works and pushes the correct parameters for WinMain/main (I'm pretty sure this one is pretty much fixed) - the really important thing (eventually) will be to call DLL entry points
 - Iron out CPU bugs (sim386) - printf doesn't work right for some reason
   - This isn't a bug so much as a missing feature, but it might be nice to add support for the PEB (since some applications might actually fuck around with that) and thus adding (at least limited) support for the FS segment register
-  - A lot of programs just flat-out will refuse to start because of the FPU
+  - A lot of programs just flat-out will refuse to start because of the lack of an FPU
 - Reorganize the thunks - split them off from ``pe_ldr.c`` with a separate C file for each DLL's thunks (also the low-order byte of the thunk ID should identify the DLL and the upper 24-bits store the function ID)
   - In addition to this, even if the host-side thunks should probably still be done one-by-one (even if with manual assistance), generating the asm for the simulator-side thunks should be fully automated - you should give it a header file with a list of function prototypes and it'll just chew through them and pop out a completely-baked ASM file
   - More code should be moved INSIDE of the DLLs (written in C & linked with the asm thunks) rather than on the host-thunk side (this should help simplify and clean up the code a good bit)
