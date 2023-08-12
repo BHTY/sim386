@@ -2,15 +2,20 @@ win32emu To-do List
 - Fix import data directory walking
 - Get more programs working (make sure to try a wide variety of CRTs)
   - Get Reversi working @ 100% (fix icons in dialogs)
+    - The issue here is that ``DialogBoxIndirectParam`` expects any icons (and probably certain other resources) found in the dialog template to be found in the ``HINSTANCE`` that you pass it (which is not the case here since the emulated instance handles != the real ones) so any icons just won't show up (though the ``ICON`` controls will still be created, they'll be drawing icons that don't exist -> they'll be blank)
+    - Short of rewriting the dialog manager, the only real option seems to be to scan the dialog template for any resource references, then enumerate over the child windows of the dialog box and "fix" those references. Right now, when a dialog box is created, I ``EnumChildWindows`` and set a default icon for every control with the ``SS_ICON`` style
   - Get FreeCell working
-- Fix the heap manager
-- ``VirtualAlloc``
-- Put more stuff for kernel32, gdi32, user32 inside of the DLL (written in C & linked with the asm thunks) rather than on the host-thunk side
-- Make sure the CRT initialization code actually works and pushes the correct parameters for WinMain/main
-- Iron out CPU bugs (sim386)
+  - CL seems like a daunting task but it could perhaps be made to work
+- Memory Management
+  - Make the heap allocator actually work and not be a giant hack (it can't free and can't grow heaps)
+  - ``VirtualAlloc`` - this'll be important for things like ``CreateDIBSection`` down the road
+- Add dynamic support for turning the debugger on and off at runtime
+- Make sure the CRT initialization code actually works and pushes the correct parameters for WinMain/main (I'm pretty sure this one is pretty much fixed) - the really important thing (eventually) will be to call DLL entry points
+- Iron out CPU bugs (sim386) - printf doesn't work right for some reason
   - This isn't a bug so much as a missing feature, but it might be nice to add support for the PEB (since some applications might actually fuck around with that) and thus adding (at least limited) support for the FS segment register
 - Reorganize the thunks - split them off from ``pe_ldr.c`` with a separate C file for each DLL's thunks (also the low-order byte of the thunk ID should identify the DLL and the upper 24-bits store the function ID)
   - In addition to this, even if the host-side thunks should probably still be done one-by-one (even if with manual assistance), generating the asm for the simulator-side thunks should be fully automated - you should give it a header file with a list of function prototypes and it'll just chew through them and pop out a completely-baked ASM file
+  - More code should be moved INSIDE of the DLLs (written in C & linked with the asm thunks) rather than on the host-thunk side (this should help simplify and clean up the code a good bit)
 - Abstract out the parts of ``pe_ldr.c`` that directly manipulate the stack (while this technically isn't CPU-dependent, it is calling convention-dependent, and win32 has different calling conventions on x86 vs MIPS)
   - Instead of directly reading from the stack inside of the thunk functions, they should call a function like ``uint32_t get_arg(i386* cpu, int arg_id);``
     - On i386, such a function would read off of the stack while on MIPS, it would read out of a register
