@@ -252,6 +252,8 @@ LRESULT CALLBACK dummy_DlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	LRESULT return_value;
 	HICON hIcon;
 
+	log_instructions = 1;
+
 	printf("\nThunking DlgProc(%p, %p, %p, %p) to ", hWnd, msg, wParam, lParam);
 
 	if (window) {
@@ -281,6 +283,8 @@ LRESULT CALLBACK dummy_DlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr);
 
 	printf(" Finished DlgProc=%p!", return_value);
+
+	log_instructions = 0;
 
 	return return_value;
 }

@@ -628,7 +628,9 @@ uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr){
 	uint32_t page_base;
 	int old_log_instructions = log_instructions;
 
-	log_instructions = 1;
+	//log_instructions = 1;
+
+	//printf("Virtual Address: %p | PDE: %p | PTE: %p\n", vaddr, pde, pte);
 
 	if (cpu->page_dir.entries[pde] == 0){
 		sprintf(error_string, "Page fault accessing address %p.\nEIP = %p ESP = %p", vaddr, cpu->eip, cpu->esp);
@@ -669,6 +671,7 @@ void virtual_mmap(i386* cpu, uint32_t vaddr, uint8_t* paddr){
 
 	if (cpu->page_dir.entries[pde] == 0){ //the virtual address points to an invalid page table
 		cpu->page_dir.entries[pde] = (i386_PT*)malloc(sizeof(i386_PT));
+		memset(cpu->page_dir.entries[pde], 0, sizeof(i386_PT));
 	}
 
 	cpu->page_dir.entries[pde]->entries[pte] = paddr;
