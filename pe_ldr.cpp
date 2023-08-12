@@ -280,17 +280,6 @@ LRESULT CALLBACK dummy_DlgProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	//call the function
 	return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr);
 
-	if (return_value == 0) { //there are a few messages that WE should handle
-		switch (msg) {
-			case WM_GETICON:
-				hIcon = LoadIcon(NULL, IDI_QUESTION);
-				return_value = (LRESULT)hIcon;
-				break;
-			default:
-				break;
-		}
-	}
-
 	printf(" Finished DlgProc=%p!", return_value);
 
 	return return_value;
@@ -389,7 +378,7 @@ uint32_t thunk_LoadCursorA(i386* cpu){
 	uint32_t hInstance = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	uint32_t lpCursorName = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
 	LPCSTR cursorName;
-
+	
 	printf("\nCalling LoadCursorA(%p, %p)", hInstance, lpCursorName);
 
 	if (hInstance){ //handle ordinal
@@ -403,20 +392,42 @@ uint32_t thunk_LoadCursorA(i386* cpu){
 }
 
 uint32_t thunk_LoadIconA(i386* cpu){
+	HICON hIcon;
+	IMAGE_RESOURCE_DATA_ENTRY* data_entry;
+	EMU_HINSTANCE* instance;
+
+	GRPICONDIR *icon_dir;
+
+	uint32_t icon_id;
+	uint32_t icon_size;
+	
 	uint32_t hInstance = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
-	uint32_t lpCursorName = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
-	LPCSTR cursorName;
+	uint32_t lpIconName = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
 
-	printf("\nCalling LoadIconA(%p, %p)", hInstance, lpCursorName);
+	printf("\nCalling LoadIconA(%p, %p)", hInstance, lpIconName);
 
-	if (hInstance){ //handle ordinal
-		cursorName = (LPCSTR)virtual_to_physical_addr(cpu, lpCursorName);
+	instance = find_instance(hInstance);
+
+	if (instance == 0) {
+		return (uint32_t)LoadIconA((HINSTANCE)hInstance, (LPCSTR)lpIconName);
 	}
-	else{
-		cursorName = (LPCSTR)lpCursorName;
-	}
+	else { //support string names
+		data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, instance->image_base + instance->root_rsdir, (LPWSTR)RT_GROUP_ICON, (LPWSTR)lpIconName, 0, 0)); //fill in 3 & 0
 
-	return (uint32_t)LoadIconA((HINSTANCE)hInstance, cursorName);
+		printf("Data entry points to %p\n", data_entry->OffsetToData);
+		icon_dir = (GRPICONDIR*)virtual_to_physical_addr(cpu, data_entry->OffsetToData + instance->image_base);
+
+		//now the smart thing to do would be to find the best icon in the icon directory but I'm just going to use the first one because lol
+
+		icon_id = icon_dir->idEntries[0].nId;
+		icon_size = icon_dir->idEntries[0].dwBytesInRes;
+
+		data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, instance->image_base + instance->root_rsdir, (LPWSTR)RT_ICON, (LPWSTR)icon_id, 0, 0));
+
+		hIcon = CreateIconFromResource(virtual_to_physical_addr(cpu, data_entry->OffsetToData + instance->image_base), icon_size, 1, 0x00030000);
+
+		return (uint32_t)hIcon;
+	}
 }
 
 uint32_t thunk_RegisterClassA(i386* cpu){
@@ -427,6 +438,8 @@ uint32_t thunk_RegisterClassA(i386* cpu){
 	uint16_t return_atom = 0;
 	uint32_t lpWndClass = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	WNDCLASSA* wc = (WNDCLASSA*)virtual_to_physical_addr(cpu, lpWndClass);
+
+	printf("\nCalling RegisterClassA(%p) with result %04x", lpWndClass);
 
 	//replace wc->lpszClassName
 	if (wc->lpszClassName != 0) {
@@ -467,8 +480,6 @@ uint32_t thunk_RegisterClassA(i386* cpu){
 	if (return_atom) {
 		registered_window_classes[return_atom] = window_class;
 	}
-
-	printf("\nCalling RegisterClassA(%p) with result %04x", lpWndClass, return_atom);
 
 	return return_atom;
 }
@@ -951,11 +962,9 @@ uint32_t thunk_LoadStringA(i386* cpu){
 	string_table = data_entry->OffsetToData + root_instance->image_base;
 	string_ptr = (uint16_t*)virtual_to_physical_addr(cpu, find_string(cpu, string_table, uID));
 
-	WideCharToMultiByte(CP_ACP, 0, (LPWCH)(string_ptr + 1), *string_ptr, _lpBuffer, cchBufferMax, NULL, NULL);
-
 	printf("\nCalling LoadStringA(%p, %p, %p, %p)", hInstance, uID, lpBuffer, cchBufferMax);
 
-	return 0;
+	return WideCharToMultiByte(CP_ACP, 0, (LPWCH)(string_ptr + 1), *string_ptr, _lpBuffer, cchBufferMax, NULL, NULL);
 }
 
 uint32_t thunk_GetTextMetricsA(i386* cpu){
@@ -1107,9 +1116,9 @@ uint32_t thunk_PostMessageA(i386* cpu){
 	uint32_t Msg = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
 	uint32_t wParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
 	uint32_t lParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
-	LPARAM _lParam = (LPARAM)virtual_to_physical_addr(cpu, lParam);
+	//LPARAM _lParam = (LPARAM)virtual_to_physical_addr(cpu, lParam);
 	printf("\nCalling PostMessageA(%p, %p, %p, %p)", hWnd, Msg, wParam, lParam);
-	return (uint32_t)PostMessageA((HWND)hWnd, (UINT)Msg, (WPARAM)wParam, (LPARAM)_lParam);
+	return (uint32_t)PostMessageA((HWND)hWnd, (UINT)Msg, (WPARAM)wParam, (LPARAM)lParam);
 }
 
 uint32_t thunk_EnableMenuItem(i386* cpu){
@@ -1379,6 +1388,8 @@ uint32_t thunk_DialogBoxParamA(i386* cpu) {
 
 	data_entry = (IMAGE_RESOURCE_DATA_ENTRY*)virtual_to_physical_addr(cpu, find_resource(cpu, instance->image_base + instance->root_rsdir, (LPWSTR)RT_DIALOG, resource_id, 0, lpTemplateName > 65535));
 	lpTemplate = (LPCDLGTEMPLATEA)virtual_to_physical_addr(cpu, data_entry->OffsetToData + instance->image_base);
+
+	//parse through the structure and find all of the icons - what to do with that info???
 		
 	temp_window_class = create_dialog_box_window_class(lpDialogFunc, instance);
 	//return_value = CreateDialogIndirectParamA(GetModuleHandle(NULL), lpTemplate, (HWND)hWndParent, (DLGPROC)dummy_DlgProc, dwInitParam);
@@ -1507,6 +1518,9 @@ void parse_optional_header(LOADED_PE_IMAGE* image, i386* cpu){
 	printf("  Heap Size: %d bytes committed (%d reserved)\n", image->heap_commit, image->heap_reserve);
 	printf("  Total Size: %d bytes (section alignment %d bytes, file alignment %d bytes)\n", optional_header->SizeOfImage, optional_header->SectionAlignment, optional_header->FileAlignment);
 
+	//allocate a heap
+	alloc_heap(cpu, image->heap_commit, image->heap_reserve);
+
 	//allocate a stack if none exists
 	stack_base = scan_free_address_space(cpu, image->stack_commit >> 12, 0x100);
 	reserve_address_space(cpu, stack_base, image->stack_commit >> 12);
@@ -1572,6 +1586,10 @@ uint32_t find_resource(i386* cpu, uint32_t pRootDirectory, LPWSTR resourceType, 
 	dirEntry3 = (IMAGE_RESOURCE_DIRECTORY_ENTRY*)(rsDir3 + 1);
 
 	return pRootDirectory + (dirEntry3->OffsetToData & 0x7FFFFFFF);
+}
+
+HICON load_icon(i386* cpu, uint32_t pRootDirectory, LPWSTR string_name, int name_or_id) {
+	return (HICON)0;
 }
 
 uint32_t find_string(i386* cpu, uint32_t string_base, uint32_t string_id) {
@@ -2204,7 +2222,7 @@ LOADED_PE_IMAGE load_pe_executable(char* filename, i386* cpu){
 
 	//allocate the heap
 	heap_init();
-	//alloc_heap(cpu, image.heap_commit, image.heap_reserve); //put it in the PEB
+	alloc_heap(cpu, image.heap_commit, image.heap_reserve); //put it in the PEB
 
 #ifdef NO_DEBUGGER
 	cpu->running = 1;

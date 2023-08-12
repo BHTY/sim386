@@ -632,8 +632,9 @@ uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr){
 
 	if (cpu->page_dir.entries[pde] == 0){
 		sprintf(error_string, "Page fault accessing address %p.\nEIP = %p ESP = %p", vaddr, cpu->eip, cpu->esp);
+		/*printf(error_string);
+		while (1);*/
 		MessageBoxA(NULL, error_string, "General Protection Fault", MB_ABORTRETRYIGNORE | MB_ICONERROR);
-		printf(error_string);
 		cpu_dump(cpu);
 		cpu->running = 0;
 		return (uint8_t*)0x0BADF00D;
@@ -647,8 +648,9 @@ uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr){
 		}
 		else {
 			sprintf(error_string, "Page fault accessing address %p.EIP = %p ESP = %p\n", vaddr, cpu->eip, cpu->esp);
+			/*printf(error_string);
+			while (1);*/
 			MessageBoxA(NULL, error_string, "General Protection Fault", MB_ABORTRETRYIGNORE | MB_ICONERROR);
-			printf(error_string);
 			cpu_dump(cpu);
 			cpu->running = 0;
 			return (uint8_t*)0xDEADBEEF;

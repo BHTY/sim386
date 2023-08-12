@@ -50,16 +50,18 @@ uint32_t alloc_heap(i386* cpu, uint32_t initial_size, uint32_t max_size){
 
 	heap_list[heap_handle].reserved_pages = pages_to_reserve;
 	heap_list[heap_handle].committed_pages = pages_to_commit;
+	heap_list[heap_handle].exists = 1;
 
 	//now, locate a suitable block of virtual address space and reserve
 	starting_address = scan_free_address_space(cpu, pages_to_reserve, 0x400);
 	reserve_address_space(cpu, starting_address, pages_to_reserve);
 	heap_list[heap_handle].starting_address = starting_address;
 
-	printf("\n  [HEAP] Allocating %d bytes of address space from %p and mapping %d pages\n", pages_to_reserve * 0x1000, starting_address, pages_to_commit);
+	printf("\n  [HEAP] Allocating %d bytes of address space from %p and mapping %d pages (handle %x)\n", pages_to_reserve * 0x1000, starting_address, pages_to_commit, heap_handle);
 
 	//allocate the requested number of pages and map them in
 	temp_ptr = (uint8_t*)malloc(pages_to_commit * 0x1000);
+	memset(temp_ptr, 0, pages_to_commit * 0x1000);
 	map_section(cpu, starting_address, temp_ptr, pages_to_commit * 0x1000);
 
 	//set a default value in there
@@ -133,10 +135,11 @@ uint32_t heap_alloc(i386* cpu, uint32_t handle, uint32_t size){
 		addr = curBlock->next;
 
 		if (!addr){ //we've reached the end of the list and still found nothing big enough to satisfy the allocation
+			//printf("\nNo memory!\n");
 			return NULL; //grow the heap!
 		}
 	}
-
+	//printf("Memory address is %p\n", addr + 16);
 	return addr + 16;
 }
 

@@ -192,3 +192,28 @@ When dummy_TimerProc is called, it first summons the ACTIVE_WINDOW corresponding
 corresponds to wParam.
 */
 //4092c8
+
+#pragma pack( push )
+#pragma pack( 2 )
+
+typedef struct GRPICONDIRENTRY
+{
+	BYTE  bWidth;
+	BYTE  bHeight;
+	BYTE  bColorCount;
+	BYTE  bReserved;
+	WORD  wPlanes;
+	WORD  wBitCount;
+	DWORD dwBytesInRes;
+	WORD  nId;
+} GRPICONDIRENTRY;
+
+typedef struct GRPICONDIR
+{
+	WORD idReserved;
+	WORD idType;
+	WORD idCount;
+	GRPICONDIRENTRY idEntries[];
+} GRPICONDIR;
+
+#pragma pack( pop )k
