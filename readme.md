@@ -12,7 +12,7 @@ win32emu To-do List
   - ``VirtualAlloc`` - this'll be important for things like ``CreateDIBSection`` down the road
 - Add dynamic support for turning the debugger on and off at runtime
 - Make sure the CRT initialization code actually works and pushes the correct parameters for WinMain/main (I'm pretty sure this one is pretty much fixed) - the really important thing (eventually) will be to call DLL entry points
-- Iron out CPU bugs (sim386) - printf doesn't work right for some reason
+- Iron out CPU bugs (sim386)
   - This isn't a bug so much as a missing feature, but it might be nice to add support for the PEB (since some applications might actually fuck around with that) and thus adding (at least limited) support for the FS segment register
   - A lot of programs just flat-out will refuse to start because of the lack of an FPU
 - Reorganize the thunks - split them off from ``pe_ldr.c`` with a separate C file for each DLL's thunks (also the low-order byte of the thunk ID should identify the DLL and the upper 24-bits store the function ID)
