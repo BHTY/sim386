@@ -1,11 +1,10 @@
 win32emu To-do List
 - Fix import data directory walking
 - Get more programs working (make sure to try a wide variety of CRTs)
-  - Get Reversi working @ 100%
+  - Get Reversi working @ 100% - ``LoadIconA`` & ``LoadAcceleratorA``
   - Get FreeCell working
 - Fix the heap manager
 - ``VirtualAlloc``
-- ``LoadIconA``
 - Put more stuff for kernel32, gdi32, user32 inside of the DLL (written in C & linked with the asm thunks) rather than on the host-thunk side
 - Make sure the CRT initialization code actually works and pushes the correct parameters for WinMain/main
 - Iron out CPU bugs (sim386)
