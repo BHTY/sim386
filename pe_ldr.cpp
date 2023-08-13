@@ -112,13 +112,16 @@ EMU_HINSTANCE* find_instance(uint32_t hInstance) {
 	return 0;
 }
 
-void add_instance(uint32_t image_base, uint32_t root_rsdir) {
+void add_instance(uint32_t image_base, uint32_t root_rsdir, uint32_t code_section, uint32_t data_section, uint32_t data_section_size) {
 	EMU_HINSTANCE* instance = root_instance;
 	EMU_HINSTANCE* prevInstance = root_instance;
 	EMU_HINSTANCE* newInstance = (EMU_HINSTANCE*)malloc(sizeof(EMU_HINSTANCE));
 	newInstance->image_base = image_base;
 	newInstance->root_rsdir = root_rsdir;
 	newInstance->next = 0;
+	newInstance->code_section = code_section;
+	newInstance->data_section = data_section;
+	newInstance->data_section_size = data_section_size;
 
 	if (root_instance == 0) {
 		root_instance = newInstance;
@@ -294,7 +297,7 @@ LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	uint32_t wndproc_addr;
 	LRESULT return_value;
 
-	printf("\nThunking WndProc(%p, %p, %p, %p) to ", hWnd, msg, wParam, lParam);
+	//printf("\nThunking WndProc(%p, %p, %p, %p) to ", hWnd, msg, wParam, lParam);
 
 	if (window) {
 		wndproc_addr = registered_window_classes[window->wndclass].wndproc;
@@ -316,11 +319,11 @@ LRESULT CALLBACK dummy_WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	cpu_push32(global_cpu, (uint32_t*)&wParam);
 	cpu_push32(global_cpu, (uint32_t*)&msg);
 	cpu_push32(global_cpu, (uint32_t*)&hWnd);
-	printf("0x%p ", wndproc_addr);
+	//printf("0x%p ", wndproc_addr);
 
 	//call the function
 	return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr);
-	printf(" Finished WndProc, EIP=%p!", global_cpu->eip);
+	//printf(" Finished WndProc, EIP=%p!", global_cpu->eip);
 
 	return return_value;
 }
@@ -585,7 +588,7 @@ uint32_t thunk_DefWindowProcA(i386* cpu){
 	uint32_t wParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 12);
 	uint32_t lParam = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 16);
 
-	printf("\nCalling DefWindowProcA(%p, %p, %p, %p)", hWnd, Msg, wParam, lParam);
+	//printf("\nCalling DefWindowProcA(%p, %p, %p, %p)", hWnd, Msg, wParam, lParam);
 
 	return (uint32_t)DefWindowProcA((HWND)hWnd, Msg, wParam, lParam);
 }
@@ -1684,7 +1687,7 @@ void parse_data_directories(LOADED_PE_IMAGE* image, i386* cpu){
 	
 	//parse resource directory
 	data_dir = &(optional_header->DataDirectory[2]);
-	add_instance(image->image_base, data_dir->VirtualAddress);
+	add_instance(image->image_base, data_dir->VirtualAddress, image->code_section, image->data_section, image->data_section_size);
 
 	//parse exception directory
 	//parse security directory
@@ -1843,6 +1846,7 @@ void parse_rt(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu){
 }
 
 void parse_text(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu){
+	image->code_section = sec->VirtualAddress;
 	//virtual_mmap(cpu, sec->VirtualAddress + image->image_base, image->data + sec->PointerToRawData); //temporary hack!
 
 	if (cpu->eip == 0){
@@ -1851,6 +1855,8 @@ void parse_text(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu){
 }
 
 void parse_data(LOADED_PE_IMAGE* image, IMAGE_SECTION_HEADER* sec, i386* cpu, uint32_t sectionSize){
+	image->data_section = sec->VirtualAddress;
+	image->data_section_size = sectionSize;
 	printf("    %d bytes initialized data, %d bytes uninitialized data\n", sec->SizeOfRawData, sectionSize - sec->SizeOfRawData);
 }
 
@@ -2276,9 +2282,10 @@ int main(int argc, char* argv[])
 
 	LOADED_PE_IMAGE hello = load_pe_executable(argv[1], &CPU);
 	log_instructions = 0;
+	CPU.cached_code_pointer = virtual_to_physical_addr(&CPU, root_instance->image_base + root_instance->code_section) - (root_instance->image_base + root_instance->code_section);
+	printf("Caching code pointer as %p.\n", CPU.cached_code_pointer);
 
 	memset(registered_window_classes, 0, sizeof(registered_window_classes));
-	add_window(0, 0);
 
 	while (1) {
 		debug_step(&CPU);

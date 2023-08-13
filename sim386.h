@@ -1,5 +1,7 @@
 #pragma once
 
+//Add caching for the stack and data pages!
+
 #include <stdint.h>
 
 #define HEADLESS
@@ -10,6 +12,7 @@
 #endif
 
 #define ALIGN(x, val)		(((x % val) == 0) ? x : (x + val) - x % val)
+#define get_reg_1632(cpu, reg)		(&(cpu->regs[reg]))
 
 //NOT USED ANYMORE!!!
 #define STACK_BASE 0x400000
@@ -26,6 +29,8 @@
 #define INDEX(SIB)	((SIB & 0x38) >> 3)
 #define BASE(SIB)	(SIB & 0x7)
 
+#ifdef OLD
+#define get_modrm()					uint8_t modrm = *(virtual_to_physical_addr(cpu, cpu->eip + 1));
 #define cjmp(cond)					uint32_t jump_target = cpu->eip + 2 + (int32_t)(int8_t)*virtual_to_physical_addr(cpu, cpu->eip + 1);\
 									printf("%p", jump_target); \
 									if (cond){ \
@@ -50,6 +55,34 @@
 									if (cond){\
 										cpu->eip = jump_target; \
 									}
+#else
+#define cjmp(cond)					uint32_t jump_target = cpu->eip + 2 + (int32_t)(int8_t)cpu->cached_code_pointer[cpu->eip + 1]; /*(int32_t)(int8_t)*virtual_to_physical_addr(cpu, cpu->eip + 1);\ */ \
+									printf("%p", jump_target); \
+									if (cond){ \
+										cpu->eip = jump_target; \
+									} else{ \
+										cpu->eip += 2; \
+									} \
+
+#define cjmpex(cond)				uint32_t imm = *(uint32_t*)(cpu->cached_code_pointer + cpu->eip + 1);  /* *(uint32_t*)virtual_to_physical_addr(cpu, cpu->eip + 1); */ \
+									uint32_t jump_target; \
+									switch(cpu->operand_size){ \
+										case 0: \
+											cpu->eip += 3; \
+											jump_target = cpu->eip + (int32_t)(int16_t)imm; \
+											break; \
+										case 1: \
+											cpu->eip += 5; \
+											jump_target = cpu->eip + imm; \
+											break; \
+									} \
+									printf("%p", jump_target); \
+									if (cond){\
+										cpu->eip = jump_target; \
+									}
+
+#define get_modrm()					uint8_t modrm = cpu->cached_code_pointer[cpu->eip + 1];
+#endif
 
 #define print_modrm()				printf("Mod=%d Reg=%d Rm=%d\n", MOD(modrm), REG(modrm), RM(modrm));
 #define print_sib()					printf("Scale=%d Index=%d Base=%d\n", SCALE(sib), INDEX(sib), BASE(sib));
@@ -99,8 +132,6 @@
 									} \
 									if (c){ printf(", "); }
 
-#define get_modrm()					uint8_t modrm = *(virtual_to_physical_addr(cpu, cpu->eip + 1));
-
 typedef struct{
 	uint8_t* entries[1024]; //points to an address in physical memory
 } i386_PT;
@@ -116,48 +147,74 @@ typedef struct BREAKPOINT{
 } BREAKPOINT;
 
 typedef struct{
-	struct{
-		union{
-			struct{
-				uint8_t al;
-				uint8_t ah;
+	union {
+		struct {
+			struct {
+				union {
+					struct {
+						uint8_t al;
+						uint8_t ah;
+					};
+					uint16_t ax;
+					uint32_t eax;
+				};
 			};
-			uint16_t ax;
-			uint32_t eax;
-		};
-	};
 
-	struct{
-		union{
-			struct{
-				uint8_t bl;
-				uint8_t bh;
+			struct {
+				union {
+					struct {
+						uint8_t cl;
+						uint8_t ch;
+					};
+					uint16_t cx;
+					uint32_t ecx;
+				};
 			};
-			uint16_t bx;
-			uint32_t ebx;
-		};
-	};
 
-	struct{
-		union{
-			struct{
-				uint8_t cl;
-				uint8_t ch;
+			struct {
+				union {
+					struct {
+						uint8_t dl;
+						uint8_t dh;
+					};
+					uint16_t dx;
+					uint32_t edx;
+				};
 			};
-			uint16_t cx;
-			uint32_t ecx;
-		};
-	};
 
-	struct{
-		union{
-			struct{
-				uint8_t dl;
-				uint8_t dh;
+			struct {
+				union {
+					struct {
+						uint8_t bl;
+						uint8_t bh;
+					};
+					uint16_t bx;
+					uint32_t ebx;
+				};
 			};
-			uint16_t dx;
-			uint32_t edx;
+
+			union {
+				uint16_t sp;
+				uint32_t esp;
+			};
+
+			union {
+				uint16_t bp;
+				uint32_t ebp;
+			};
+
+			union {
+				uint16_t si;
+				uint32_t esi;
+			};
+
+			union {
+				uint16_t di;
+				uint32_t edi;
+			};
 		};
+
+		uint32_t regs[8];
 	};
 
 	//segment registers are basically ignored here
@@ -167,28 +224,8 @@ typedef struct{
 	uint16_t es;
 
 	union{
-		uint16_t si;
-		uint32_t esi;
-	};
-
-	union{
-		uint16_t di;
-		uint32_t edi;
-	};
-
-	union{
 		uint16_t ip;
 		uint32_t eip;
-	};
-
-	union{
-		uint16_t sp;
-		uint32_t esp;
-	};
-
-	union{
-		uint16_t bp;
-		uint32_t ebp;
 	};
 
 	union{
@@ -210,6 +247,8 @@ typedef struct{
 
 	uint32_t stack_page_table;
 	uint32_t lowest_committed_page;
+
+	uint8_t* cached_code_pointer;
 } i386; //address size?
 
 typedef struct RESERVED_BLOCK{

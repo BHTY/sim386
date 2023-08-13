@@ -55,6 +55,10 @@ typedef struct{
 	uint32_t stack_reserve;
 	uint32_t heap_commit;
 	uint32_t heap_reserve;
+
+	uint32_t code_section;
+	uint32_t data_section;
+	uint32_t data_section_size;
 } LOADED_PE_IMAGE;
 
 typedef struct LOADED_IMAGE{
@@ -74,6 +78,9 @@ typedef struct WINDOW_CLASS{
 typedef struct EMU_HINSTANCE{
 	uint32_t image_base; //contains the actual HINSTANCE (GetModuleHandle(NULL) always returns the HINSTANCE of the root - DLL entry points are passed their HINSTANCE)
 	uint32_t root_rsdir;
+	uint32_t code_section;
+	uint32_t data_section;
+	uint32_t data_section_size;
 	struct EMU_HINSTANCE* next;
 } EMU_HINSTANCE;
 
@@ -101,6 +108,7 @@ typedef struct WINDOW_TIMER {
 
 uint32_t find_resource(i386* cpu, uint32_t pRootDirectory, LPWSTR resourceType, LPWSTR resourceName, int type_id, int name_id);
 uint32_t find_string(i386* cpu, uint32_t string_base, uint32_t string_id);
+EMU_HINSTANCE* find_instance(uint32_t hInstance);
 
 /* 
 The (mostly linked) lists I'll need
@@ -216,4 +224,4 @@ typedef struct GRPICONDIR
 	GRPICONDIRENTRY idEntries[];
 } GRPICONDIR;
 
-#pragma pack( pop )k
+#pragma pack( pop )
