@@ -180,18 +180,17 @@ void register_window_class(char* class_name, uint32_t WndProc){
 }
 
 void register_window_timer(HWND hwnd, uint32_t timerproc, int id){
-	char name_buffer[100];
-	GetClassNameA(hwnd, name_buffer, 99);
+	ACTIVE_WINDOW* window = find_window((uint32_t)hwnd);
 
-	WINDOW_CLASS* temp = window_classes;
+	//iterate through the timers
+	window->timers = (WINDOW_TIMER*)malloc(sizeof(WINDOW_TIMER));
+	window->timers->next = 0;
+	window->timers->timerID = id;
+	window->timers->TimerProc = timerproc;
+}
 
-	while (temp){
-		if (strcmp(name_buffer, temp->class_name) == 0){ //match found
-			temp->TimerProc = timerproc;
-		}
-
-		temp = temp->next;
-	}
+WINDOW_TIMER* find_timer(ACTIVE_WINDOW* window, uint32_t nID) {
+	return window->timers;
 }
 
 LOADED_PE_IMAGE* find_image(char* name){
@@ -209,32 +208,20 @@ LOADED_PE_IMAGE* find_image(char* name){
 }
 
 LRESULT CALLBACK dummy_TimerProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam){
-	uint32_t wndproc_addr;
-	HRESULT return_value;
-	LPSTR name_buffer = (LPSTR)malloc(100);
-	GetClassNameA(hWnd, name_buffer, 100);
-	wndproc_addr = lookup_classname_timerproc((char*)name_buffer);
-	free(name_buffer);
+	ACTIVE_WINDOW* window = find_window((uint32_t)hWnd);
+	uint32_t TimerProc = find_timer(window, wParam)->TimerProc;
 
-	printf("\nThunking TimerProc(%p, %p, %p, %p)", hWnd, msg, wParam, lParam);
+	printf("\nThunking TimerProc(%p, %p, %p, %p) to %p", hWnd, msg, wParam, lParam, TimerProc);
 
-	if (wndproc_addr){
-		cpu_push32(global_cpu, &(global_cpu->eip));
-		cpu_push32(global_cpu, (uint32_t*)&lParam);
-		cpu_push32(global_cpu, (uint32_t*)&wParam);
-		cpu_push32(global_cpu, (uint32_t*)&msg);
-		cpu_push32(global_cpu, (uint32_t*)&hWnd);
+	//push the args onto the stack
+	cpu_push32(global_cpu, &(global_cpu->eip));
+	cpu_push32(global_cpu, (uint32_t*)&lParam);
+	cpu_push32(global_cpu, (uint32_t*)&wParam);
+	cpu_push32(global_cpu, (uint32_t*)&msg);
+	cpu_push32(global_cpu, (uint32_t*)&hWnd);
 
-		//call the function
-		return_value = (LRESULT)cpu_reversethunk(global_cpu, wndproc_addr, escape_addr); //it should return into the unthunker
-
-		//pop the arguments off of the stack
-		//global_cpu->esp += 16;
-
-		printf(" Finished TimerProc, EIP=%p!", global_cpu->eip);
-
-		return return_value;
-	}
+	//call the function
+	return (LRESULT)cpu_reversethunk(global_cpu, TimerProc, escape_addr);
 }
 
 BOOL CALLBACK enumproc_icons(HWND hwnd, LPARAM lParam) {
@@ -1188,6 +1175,7 @@ uint32_t thunk_KillTimer(i386* cpu){
 	uint32_t hWnd = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
 	uint32_t uIDEvent = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 8);
 	printf("\nCalling KillTimer(%p, %p)", hWnd, uIDEvent);
+	//unregister_window_timer((HWND)hWnd, (UINT_PTR)uIDEvent);
 	return (uint32_t)KillTimer((HWND)hWnd, (UINT_PTR)uIDEvent);
 }
 
@@ -1433,6 +1421,29 @@ uint32_t thunk_EndDialog(i386* cpu) {
 	return (uint32_t)EndDialog((HWND)hDlg, (INT_PTR)nResult);
 }
 
+uint32_t thunk_GetLocalTime(i386* cpu) {
+	uint32_t lpSystemTime = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	LPSYSTEMTIME _lpSystemTime = (LPSYSTEMTIME)virtual_to_physical_addr(cpu, lpSystemTime);
+	printf("\nCalling GetLocalTime(%p)", lpSystemTime);
+	GetLocalTime((LPSYSTEMTIME)_lpSystemTime);
+	return 0;
+}
+
+uint32_t thunk_GetSystemTime(i386* cpu) {
+	uint32_t lpSystemTime = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	LPSYSTEMTIME _lpSystemTime = (LPSYSTEMTIME)virtual_to_physical_addr(cpu, lpSystemTime);
+	printf("\nCalling GetSystemTime(%p)", lpSystemTime);
+	GetSystemTime((LPSYSTEMTIME)_lpSystemTime);
+	return 0;
+}
+
+uint32_t thunk_GetTimeZoneInformation(i386* cpu) {
+	uint32_t lpTimeZoneInformation = *(uint32_t*)virtual_to_physical_addr(cpu, cpu->esp + 4);
+	LPTIME_ZONE_INFORMATION _lpTimeZoneInformation = (LPTIME_ZONE_INFORMATION)virtual_to_physical_addr(cpu, lpTimeZoneInformation);
+	printf("\nCalling GetTimeZoneInformation(%p)", lpTimeZoneInformation);
+	return (uint32_t)GetTimeZoneInformation((LPTIME_ZONE_INFORMATION)_lpTimeZoneInformation);
+}
+
 uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thunk_SetBkMode, thunk_GetModuleHandleA, thunk_LoadCursorA, thunk_LoadIconA, thunk_RegisterClassA, thunk_CreateWindowExA, //0x00 - 0x07
 									   thunk_ShowWindow, thunk_UpdateWindow, thunk_DefWindowProcA, thunk_PeekMessageA, thunk_TranslateMessage, thunk_DispatchMessageA, thunk_GetCommandLineA, thunk_GetStartupInfoA, //0x08 - 0x0F
 									   thunk_RegisterClassExA, thunk_GetMessageA, thunk_GetStockObject, thunk_PostQuitMessage, thunk_EndPaint, thunk_DrawTextA, thunk_GetClientRect, thunk_BeginPaint, //0x10 - 0x17
@@ -1444,13 +1455,15 @@ uint32_t(*thunk_table[256])(i386*) = { thunk_MessageBoxA, thunk_ExitProcess, thu
 									   thunk_PostMessageA, thunk_EnableMenuItem, thunk_IsIconic, thunk_GetKeyState, thunk_SetTimer, thunk_KillTimer, thunk_Ellipse, thunk_ShellAboutA, //0x40 - 0x47
 									   thunk_GetWindowDC, thunk_SendMessageA, thunk_GetDlgItem, thunk_GetDlgItemInt, thunk_DrawMenuBar, thunk_GetEnvironmentStringsA, thunk_CreateICA, thunk_StretchBlt, //0x48 - 0x4F
 									   thunk_GetPixel, thunk_BitBlt, thunk_CreateCompatibleDC, thunk_CreateCompatibleBitmap, thunk_CreatePen, thunk_DeleteDC, thunk_ReadFile, thunk_DialogBoxParamA, //0x50 - 0x57
-									   thunk_EndDialog, 0, 0, 0, 0, 0, 0, 0};
+									   thunk_EndDialog, thunk_GetLocalTime, thunk_GetSystemTime, thunk_GetTimeZoneInformation, 0, 0, 0, 0};
 
 void handle_syscall(i386* cpu){
+	char buffer[40];
 	int function_id = cpu->eax;
 
 	if (thunk_table[function_id] == 0){
-		printf("\nUnimplemented thunk %x!", function_id);
+		sprintf(buffer, "\nUnimplemented thunk 0x%x!", function_id);
+		MessageBoxA(NULL, buffer, "win32emu", MB_OK | MB_ICONSTOP);
 		cpu->running = 0;
 	}
 	else{
@@ -2283,6 +2296,9 @@ int main(int argc, char* argv[])
 	LOADED_PE_IMAGE hello = load_pe_executable(argv[1], &CPU);
 	log_instructions = 0;
 	CPU.cached_code_pointer = virtual_to_physical_addr(&CPU, root_instance->image_base + root_instance->code_section) - (root_instance->image_base + root_instance->code_section);
+	CPU.cached_data_section = virtual_to_physical_addr(&CPU, root_instance->image_base + root_instance->data_section) - (root_instance->image_base + root_instance->data_section);
+	CPU.data_section_size = root_instance->data_section_size;
+	CPU.data_section_start = root_instance->data_section + root_instance->image_base;
 	printf("Caching code pointer as %p.\n", CPU.cached_code_pointer);
 
 	memset(registered_window_classes, 0, sizeof(registered_window_classes));

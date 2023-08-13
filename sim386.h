@@ -115,7 +115,7 @@
 											printf("%s", tables[cpu->operand_size][RM(modrm)]); \
 											break; \
 										default: \
-											dst_ptr = (uint32_t*)virtual_to_physical_addr(cpu, calc_modrm_addr(cpu, modrm)); \
+											dst_ptr = (uint32_t*)calc_modrm_addr(cpu, modrm); /*  (uint32_t*)virtual_to_physical_addr(cpu, calc_modrm_addr(cpu, modrm)); \ */ \
 											break; \
 									} \
 									if (c){ printf(", "); }
@@ -127,7 +127,7 @@
 											printf("%s", reg_names_8[RM(modrm)]); \
 											break; \
 										default: \
-											dst_ptr = (uint8_t*)virtual_to_physical_addr(cpu, calc_modrm_addr(cpu, modrm)); \
+											dst_ptr = calc_modrm_addr(cpu, modrm); /* (uint8_t*)virtual_to_physical_addr(cpu, calc_modrm_addr(cpu, modrm)); \ */ \
 											break; \
 									} \
 									if (c){ printf(", "); }
@@ -249,6 +249,15 @@ typedef struct{
 	uint32_t lowest_committed_page;
 
 	uint8_t* cached_code_pointer;
+
+	//cached stack page
+	uint8_t* cached_stack_page;
+	uint32_t stack_page_end;
+	 
+	//cached data section
+	uint8_t* cached_data_section;
+	uint32_t data_section_start;
+	uint32_t data_section_size;
 } i386; //address size?
 
 typedef struct RESERVED_BLOCK{

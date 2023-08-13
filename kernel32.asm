@@ -234,6 +234,33 @@ ReadFile:
 	mov eax, THUNK_KERNEL32_READFILE
 	int SYSCALL_THUNK
 	ret 0x14
+	
+global GetLocalTime
+extern GetLocalTime
+export GetLocalTime
+
+GetLocalTime:
+	mov eax, THUNK_KERNEL32_GETLOCALTIME
+	int SYSCALL_THUNK
+	ret 0x4
+
+global GetSystemTime
+extern GetSystemTime
+export GetSystemTime
+
+GetSystemTime:
+	mov eax, THUNK_KERNEL32_GETSYSTEMTIME
+	int SYSCALL_THUNK
+	ret 0x4
+
+global GetTimeZoneInformation
+extern GetTimeZoneInformation
+export GetTimeZoneInformation
+
+GetTimeZoneInformation:
+	mov eax, THUNK_KERNEL32_GETTIMEZONEINFORMATION
+	int SYSCALL_THUNK
+	ret 0x4
 
 THUNK_KERNEL32_EXITPROCESS equ 0x01
 THUNK_KERNEL32_GETMODULEHANDLEA equ 0x03
@@ -254,4 +281,7 @@ THUNK_KERNEL32_WRITEFILE equ 0x29
 THUNK_KERNEL32_HEAPFREE equ 0x2A
 THUNK_KERNEL32_GETENVIRONMENTSTRINGSA equ 0x4D
 THUNK_KERNEL32_READFILE equ 0x56
+THUNK_KERNEL32_GETLOCALTIME equ 0x59
+THUNK_KERNEL32_GETSYSTEMTIME equ 0x5A
+THUNK_KERNEL32_GETTIMEZONEINFORMATION equ 0x5B
 SYSCALL_THUNK equ 0x80

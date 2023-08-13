@@ -563,7 +563,7 @@ uint32_t calc_sib(i386* cpu, uint8_t modrm) {
 	return addr;
 }
 
-uint32_t calc_modrm_addr(i386* cpu, uint8_t modrm) {
+uint32_t _calc_modrm_addr(i386* cpu, uint8_t modrm) {
 	uint32_t addr;
 
 	printf("[");
@@ -604,6 +604,23 @@ uint32_t calc_modrm_addr(i386* cpu, uint8_t modrm) {
 	printf("]");
 
 	return addr;
+}
+
+uint8_t* calc_modrm_addr(i386* cpu, uint8_t modrm) {
+	uint32_t address = _calc_modrm_addr(cpu, modrm);
+
+	//first, check the data page
+	if ((address - cpu->data_section_start) < cpu->data_section_size) {
+		return cpu->cached_data_section + address;
+	}
+
+	//check the stack page
+	if ((cpu->stack_page_end - address) < 4096) {
+		return cpu->cached_stack_page + address;
+	}
+
+	//if all else fails, fall back to this
+	return virtual_to_physical_addr(cpu, address);
 }
 
 uint8_t* virtual_to_physical_addr(i386* cpu, uint32_t vaddr) {
@@ -853,6 +870,16 @@ void op_2B(i386* cpu) { //SUB r16/32, r/m16/32
 		cpu_sub32(cpu, src_ptr, dst_ptr);
 		break;
 	}
+}
+
+void op_30(i386* cpu) { //XOR r/m8, r8
+	printf("XOR ");
+	get_modrm();
+	cpu->eip += 2;
+	get_modrm_dst_ptr_8(1);
+	get_modrm_src_reg_8();
+	printf("%s", tables[cpu->operand_size][REG(modrm)]);
+	cpu_xor8(cpu, dst_ptr, src_ptr);
 }
 
 void op_33(i386* cpu) { //xor r32, r/m32
@@ -1534,7 +1561,7 @@ void op_8D(i386* cpu) { //LEA r32, m
 	get_modrm();
 	printf("LEA %s, ", reg_names_32[REG(modrm)]);
 	cpu->eip += 2;
-	uint32_t addr = calc_modrm_addr(cpu, modrm);
+	uint32_t addr = _calc_modrm_addr(cpu, modrm);
 	uint32_t* dst_ptr = get_reg_1632(cpu, REG(modrm));
 	*dst_ptr = addr;
 }
@@ -1779,6 +1806,7 @@ void op_C1(i386* cpu) { //shift r/m16/32, imm8
 }
 
 void op_C2(i386* cpu) { //ret imm16
+	uint32_t stack_base = (cpu->esp >> 20) << 20;
 	uint32_t eip = cpu->eip >> 20;
 	cpu->eip++;
 	printf("RET ");
@@ -1796,9 +1824,15 @@ void op_C2(i386* cpu) { //ret imm16
 			cpu->cached_code_pointer = virtual_to_physical_addr(cpu, instance->image_base + instance->code_section) - (instance->image_base + instance->code_section);
 		}
 	}
+
+	cpu->cached_stack_page = virtual_to_physical_addr(cpu, stack_base) - stack_base;
+	cpu->stack_page_end = 0xFFF + stack_base;
 }
 
 void op_C3(i386* cpu) { //ret
+	char buf[80];
+
+	uint32_t stack_base = (cpu->esp >> 12) << 12;
 	uint32_t eip = cpu->eip >> 20;
 	printf("RET");
 	cpu->eip = cpu_pop32(cpu);
@@ -1807,6 +1841,9 @@ void op_C3(i386* cpu) { //ret
 		EMU_HINSTANCE* instance = find_instance((cpu->eip >> 20) << 20);
 		cpu->cached_code_pointer = virtual_to_physical_addr(cpu, instance->image_base + instance->code_section) - (instance->image_base + instance->code_section);
 	}
+
+	cpu->cached_stack_page = virtual_to_physical_addr(cpu, stack_base) - stack_base;
+	cpu->stack_page_end = 0xFFF + stack_base;
 }
 
 void op_C6(i386* cpu) { //MOV r/m8, imm8
@@ -2550,7 +2587,7 @@ void(*op_table[256])(i386* cpu) = {
 	0, //0x2d
 	0, //0x2e
 	0, //0x2f
-	0, //0x30
+	op_30, //0x30
 	0, //0x31
 	0, //0x32
 	op_33, //0x33
