@@ -15,9 +15,7 @@ win32emu To-do List
 - Iron out CPU bugs (sim386)
   - This isn't a bug so much as a missing feature, but it might be nice to add support for the PEB (since some applications might actually fuck around with that) and thus adding (at least limited) support for the FS segment register
   - A lot of programs just flat-out will refuse to start because of the lack of an FPU
-  - The CPU is also EXTREMELY SLOW (on the order of ~70 KIPS) -- it seems likely that the fact that it has to consult the page tables for EVERY memory access is likely murdering performance. The operative solution in my opinion would seem to be to cache the current code region
-    - This will mean that the simulator doesn't have to touch the page tables on every single instruction/immediate fetch
-    - Basically, the CPU would have access to a few specially mapped blocks of memory (the current code and data sections) that it can use to speed up certain operations
+  - The CPU is also pretty slow (a little over 1 MIPS on a fairly beefy modern machine), though caching the stack and data pages should help matters
     - Whenever you do a "far" jump/call (i.e. a jump into another code section), the block is invalidated and replaced
 - Reorganize the thunks - split them off from ``pe_ldr.c`` with a separate C file for each DLL's thunks (also the low-order byte of the thunk ID should identify the DLL and the upper 24-bits store the function ID)
   - In addition to this, even if the host-side thunks should probably still be done one-by-one (even if with manual assistance), generating the asm for the simulator-side thunks should be fully automated - you should give it a header file with a list of function prototypes and it'll just chew through them and pop out a completely-baked ASM file
